@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import inspect, text
 from itertools import combinations
 from datetime import datetime
 from openai import OpenAI
@@ -14,13 +15,51 @@ database_url = os.environ.get("DATABASE_URL")
 if database_url:
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url.replace("postgres://", "postgresql://")
 else:
-    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///clashtest.db"
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///modcrash.db"
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+
+
+# =========================
+# Game Profiles
+# =========================
+
+GAME_PROFILES = {
+    "skyrim": {
+        "label": "Skyrim / Skyrim Special Edition",
+        "extensions": [".esp", ".esm", ".esl"],
+        "examples": ["SkyUI", "XPMSSE", "Serana Dialogue Add-On"]
+    },
+    "fallout4": {
+        "label": "Fallout 4",
+        "extensions": [".esp", ".esm", ".esl"],
+        "examples": ["LooksMenu", "Sim Settlements 2", "Full Dialogue Interface"]
+    },
+    "stardew": {
+        "label": "Stardew Valley",
+        "extensions": [".dll", ".json", ".zip"],
+        "examples": ["SMAPI", "Content Patcher", "Stardew Valley Expanded"]
+    },
+    "minecraft": {
+        "label": "Minecraft",
+        "extensions": [".jar", ".zip"],
+        "examples": ["Fabric API", "Sodium", "Create"]
+    },
+    "cyberpunk": {
+        "label": "Cyberpunk 2077",
+        "extensions": [".archive", ".xl", ".reds", ".lua"],
+        "examples": ["Cyber Engine Tweaks", "ArchiveXL", "TweakXL"]
+    },
+    "generic": {
+        "label": "其他遊戲 / 通用",
+        "extensions": [],
+        "examples": ["Mod A", "Mod B", "Texture Pack"]
+    }
+}
 
 
 # =========================
@@ -32,7 +71,7 @@ PLAN_LIMITS = {
         "name": "免費版",
         "max_mods": 30,
         "allow_ai": False,
-        "max_display_pairs": 80
+        "max_display_pairs": 100
     },
     "pro": {
         "name": "訂閱版",
@@ -47,11 +86,12 @@ PLAN_LIMITS = {
 # Database Models
 # =========================
 # 注意：
-# risk 欄位保留，避免既有資料庫需要 migration。
-# 但實際內容改存「衝突程度」，例如：中度功能異常、視覺/地圖異常。
+# risk 欄位保留，避免舊資料庫需要複雜 migration。
+# 但內容會改存「衝突程度」，例如：中度功能異常、視覺 / 地圖異常。
 
 class ConflictRule(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    game = db.Column(db.String(80), default="skyrim")
     module_a = db.Column(db.String(255), nullable=False)
     module_b = db.Column(db.String(255), nullable=False)
     conflict_type = db.Column(db.String(120), default="Unknown Conflict")
@@ -64,6 +104,7 @@ class ConflictRule(db.Model):
 
 class SafeCombination(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    game = db.Column(db.String(80), default="skyrim")
     module_a = db.Column(db.String(255), nullable=False)
     module_b = db.Column(db.String(255), nullable=False)
     report_count = db.Column(db.Integer, default=1)
@@ -73,6 +114,7 @@ class SafeCombination(db.Model):
 
 class RawReport(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    game = db.Column(db.String(80), default="skyrim")
     report_type = db.Column(db.String(50), nullable=False)
     content = db.Column(db.Text, nullable=False)
     ai_result = db.Column(db.Text)
@@ -80,20 +122,71 @@ class RawReport(db.Model):
 
 
 # =========================
-# Utility Functions
+# Schema Migration Helper
+# =========================
+
+def ensure_schema():
+    db.create_all()
+
+    inspector = inspect(db.engine)
+
+    table_map = {
+        "conflict_rule": "game",
+        "safe_combination": "game",
+        "raw_report": "game"
+    }
+
+    with db.engine.begin() as conn:
+        for table_name, column_name in table_map.items():
+            if not inspector.has_table(table_name):
+                continue
+
+            columns = [col["name"] for col in inspector.get_columns(table_name)]
+
+            if column_name not in columns:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {table_name} "
+                        f"ADD COLUMN {column_name} VARCHAR(80) DEFAULT 'skyrim'"
+                    )
+                )
+
+
+# =========================
+# Request Helpers
 # =========================
 
 def get_plan_from_request():
     plan = request.form.get("plan", "free").lower().strip()
+
     if plan not in PLAN_LIMITS:
         plan = "free"
+
     return plan
+
+
+def get_game_from_request():
+    game = request.form.get("game", "skyrim").lower().strip()
+
+    if game not in GAME_PROFILES:
+        game = "generic"
+
+    return game
+
+
+def get_game_from_json(data):
+    game = data.get("game", "skyrim").lower().strip()
+
+    if game not in GAME_PROFILES:
+        game = "generic"
+
+    return game
 
 
 def is_pro_authorized():
     """
-    如果你有設定 PRO_ACCESS_CODE，訂閱版就需要輸入相同代碼。
-    如果沒有設定 PRO_ACCESS_CODE，則預設為展示模式，允許切換 Pro。
+    如果 Render 有設定 PRO_ACCESS_CODE，Pro 就需要輸入相同代碼。
+    如果沒有設定 PRO_ACCESS_CODE，則視為展示模式，允許直接使用 Pro。
     """
     required_code = os.environ.get("PRO_ACCESS_CODE")
 
@@ -106,54 +199,142 @@ def is_pro_authorized():
     return input_code == required_code or header_code == required_code
 
 
-def normalize_pair(a, b):
-    a = a.replace("*", "").strip()
-    b = b.replace("*", "").strip()
-    return tuple(sorted([a, b]))
+# =========================
+# Mod Parsing
+# =========================
+
+def clean_mod_line(line):
+    line = line.strip()
+
+    if not line:
+        return ""
+
+    line = line.replace("\ufeff", "")
+    line = line.replace("*", "").strip()
+
+    for sep in ["#", "//"]:
+        if sep in line:
+            line = line.split(sep)[0].strip()
+
+    line = re.sub(r"^[-•●▪]+\s*", "", line)
+    line = re.sub(r"^\d+[\.\)]\s*", "", line)
+
+    line = re.sub(r"^\[[A-Fa-f0-9\s]+\]\s*", "", line)
+    line = re.sub(r"^FE\s+[A-Fa-f0-9]{3}\s+", "", line, flags=re.IGNORECASE)
+    line = re.sub(r"^[A-Fa-f0-9]{2,3}\s+", "", line)
+
+    for sep in ["\t", "|", ","]:
+        if sep in line:
+            line = line.split(sep)[0].strip()
+
+    line = re.sub(r"\s+\(enabled\)$", "", line, flags=re.IGNORECASE)
+    line = re.sub(r"\s+\(disabled\)$", "", line, flags=re.IGNORECASE)
+    line = re.sub(r"\s+\[enabled\]$", "", line, flags=re.IGNORECASE)
+    line = re.sub(r"\s+\[disabled\]$", "", line, flags=re.IGNORECASE)
+
+    return line.strip()
 
 
-def extract_mods(text):
+def is_noise_line(line):
+    if not line:
+        return True
+
+    lower = line.lower().strip()
+
+    noise_keywords = [
+        "plugins",
+        "plugin list",
+        "load order",
+        "mod list",
+        "active mods",
+        "inactive mods",
+        "enabled mods",
+        "disabled mods",
+        "crash log",
+        "stack trace",
+        "error",
+        "warning",
+        "----",
+        "===="
+    ]
+
+    if lower in noise_keywords:
+        return True
+
+    if len(line) > 120:
+        return True
+
+    return False
+
+
+def normalize_mod_name(name):
+    name = clean_mod_line(name)
+    name = re.sub(r"\s+", " ", name).strip()
+    name = name.strip("\"'")
+    return name
+
+
+def extract_mods(text, game="generic"):
+    """
+    支援：
+    1. plugins.txt / loadorder.txt
+    2. 直接輸入模組名稱
+    3. 不同遊戲副檔名
+    """
     mods = []
+    profile = GAME_PROFILES.get(game, GAME_PROFILES["generic"])
+    extensions = profile.get("extensions", [])
 
-    for line in text.splitlines():
-        line = line.strip().replace("*", "")
+    for raw_line in text.splitlines():
+        line = normalize_mod_name(raw_line)
 
-        match = re.search(r"[\w\-\s\[\]\(\)']+\.(esp|esm|esl)", line, re.IGNORECASE)
+        if is_noise_line(line):
+            continue
 
-        if match:
-            mod_name = match.group(0).strip()
-            mods.append(mod_name)
+        # 1. 有副檔名的檔名
+        if extensions:
+            lower = line.lower()
+            if any(lower.endswith(ext.lower()) for ext in extensions):
+                mods.append(line)
+                continue
 
-    return sorted(list(set(mods)))
+        # 2. 沒副檔名也接受，一行一個模組名
+        if 2 <= len(line) <= 80:
+            sentence_marks = ["。", "，", "；", "："]
+            if not any(mark in line for mark in sentence_marks):
+                mods.append(line)
+
+    seen = set()
+    clean_mods = []
+
+    for mod in mods:
+        key = mod.lower()
+
+        if key not in seen:
+            seen.add(key)
+            clean_mods.append(mod)
+
+    return clean_mods
+
+
+# =========================
+# Conflict Helpers
+# =========================
+
+def normalize_pair(a, b):
+    a = normalize_mod_name(a)
+    b = normalize_mod_name(b)
+    return tuple(sorted([a, b], key=lambda x: x.lower()))
 
 
 def calculate_confidence(count):
     return round(min(0.35 + count * 0.08, 0.98), 2)
 
 
-def normalize_conflict_degree(value, conflict_type="Unknown Conflict"):
-    """
-    把舊資料 High / Medium / Low 轉成玩家看得懂的衝突程度。
-    """
-    if not value:
-        return default_degree_by_type(conflict_type)
-
-    value = value.strip()
-
-    legacy_map = {
-        "High": "高度崩潰風險",
-        "Medium": "中度功能異常",
-        "Low": "輕微覆蓋",
-        "Unknown": "未知衝突"
-    }
-
-    return legacy_map.get(value, value)
-
-
 def default_degree_by_type(conflict_type):
     conflict_type = (conflict_type or "").lower()
 
-    if "dependency" in conflict_type:
+    if "dependency" in conflict_type or "missing" in conflict_type:
         return "啟動阻斷"
 
     if "skeleton" in conflict_type:
@@ -168,68 +349,132 @@ def default_degree_by_type(conflict_type):
     if "asset" in conflict_type or "texture" in conflict_type or "mesh" in conflict_type:
         return "視覺 / 地圖異常"
 
+    if "map" in conflict_type or "world" in conflict_type:
+        return "視覺 / 地圖異常"
+
     if "load order" in conflict_type:
         return "輕微覆蓋"
+
+    if "loader" in conflict_type or "version" in conflict_type:
+        return "啟動阻斷"
 
     return "中度功能異常"
 
 
-def impact_description(conflict_type, conflict_degree):
-    """
-    給玩家看的影響描述。
-    """
-    text = f"{conflict_type} {conflict_degree}".lower()
+def normalize_conflict_degree(value, conflict_type="Unknown Conflict"):
+    if not value:
+        return default_degree_by_type(conflict_type)
 
-    if "dependency" in text or conflict_degree == "啟動阻斷":
+    value = value.strip()
+
+    legacy_map = {
+        "High": "高度崩潰風險",
+        "Medium": "中度功能異常",
+        "Low": "輕微覆蓋",
+        "Unknown": "未知衝突"
+    }
+
+    valid_values = [
+        "啟動阻斷",
+        "高度崩潰風險",
+        "中度功能異常",
+        "視覺 / 地圖異常",
+        "輕微覆蓋",
+        "未知衝突",
+        "無明顯衝突"
+    ]
+
+    if value in legacy_map:
+        return legacy_map[value]
+
+    if value in valid_values:
+        return value
+
+    return default_degree_by_type(conflict_type)
+
+
+def impact_description(conflict_type, conflict_degree):
+    text_all = f"{conflict_type} {conflict_degree}".lower()
+
+    if "dependency" in text_all or "missing" in text_all or conflict_degree == "啟動阻斷":
         return {
             "impact_area": "啟動 / 讀檔",
-            "effect": "可能缺少前置模組，遊戲可能無法啟動、讀檔閃退，或在進入主選單前崩潰。"
+            "effect": "可能缺少前置模組或版本不相容，遊戲可能無法啟動、讀檔閃退，或在主選單前崩潰。"
         }
 
-    if "skeleton" in text:
+    if "loader" in text_all or "version" in text_all:
+        return {
+            "impact_area": "模組載入器 / 版本",
+            "effect": "可能因遊戲版本、模組載入器或必要函式庫不同，造成遊戲啟動失敗或進入世界時崩潰。"
+        }
+
+    if "skeleton" in text_all:
         return {
             "impact_area": "角色骨架 / 動作",
-            "effect": "遊戲可能可以啟動，但角色可能出現 T-Pose、動作異常、戰鬥動畫錯誤，嚴重時會讀檔或戰鬥中崩潰。"
+            "effect": "遊戲可能可以啟動，但角色可能出現 T-Pose、動作異常、戰鬥動畫錯誤，嚴重時會崩潰。"
         }
 
-    if "script" in text:
+    if "script" in text_all:
         return {
             "impact_area": "任務 / 腳本",
-            "effect": "遊戲通常可以執行，但任務可能卡住、功能不觸發、技能或事件失效，長時間遊玩後可能出現存檔污染。"
+            "effect": "遊戲通常可以執行，但任務可能卡住、功能不觸發、事件失效，長時間遊玩後可能出現存檔污染。"
         }
 
-    if "dialogue" in text or "dialog" in text:
+    if "dialogue" in text_all or "dialog" in text_all:
         return {
             "impact_area": "角色 / 對話",
-            "effect": "遊戲通常可以執行，但 NPC 對話、角色互動、任務台詞或多話系統可能出現缺失、重複、錯亂。"
+            "effect": "遊戲通常可以執行，但 NPC 對話、角色互動、任務台詞或多話系統可能出現缺失、重複或錯亂。"
         }
 
-    if "asset" in text or "texture" in text or "mesh" in text or conflict_degree == "視覺 / 地圖異常":
+    if (
+        "asset" in text_all
+        or "texture" in text_all
+        or "mesh" in text_all
+        or "map" in text_all
+        or "world" in text_all
+        or conflict_degree == "視覺 / 地圖異常"
+    ):
         return {
             "impact_area": "地圖 / 材質 / 模型",
             "effect": "遊戲通常可以執行，但地圖、建築、角色裝備或物件可能出現破圖、紫色材質、模型缺失或碰撞異常。"
         }
 
-    if "load order" in text or conflict_degree == "輕微覆蓋":
+    if "load order" in text_all or conflict_degree == "輕微覆蓋":
         return {
             "impact_area": "模組排序 / 覆蓋",
-            "effect": "通常不會直接造成閃退，但可能導致部分設定被覆蓋、功能優先順序錯誤或某些模組效果不明顯。"
+            "effect": "通常不會直接造成閃退，但可能導致部分設定被覆蓋、功能優先順序錯誤或模組效果不明顯。"
+        }
+
+    if conflict_degree == "無明顯衝突":
+        return {
+            "impact_area": "無",
+            "effect": "目前資料庫中此組合被回報為可正常共存。"
         }
 
     return {
         "impact_area": "未知區域",
-        "effect": "目前資料不足，僅能判斷此組合可能存在相容性問題，建議使用訂閱版深度分析或提供 crash log。"
+        "effect": "目前資料不足，僅能判斷此組合可能存在相容性問題，建議使用訂閱版深度分析或提供錯誤描述。"
     }
 
 
-def find_conflict(module_a, module_b):
+def find_conflict(game, module_a, module_b):
     a, b = normalize_pair(module_a, module_b)
-    return ConflictRule.query.filter_by(module_a=a, module_b=b).first()
+
+    return ConflictRule.query.filter_by(
+        game=game,
+        module_a=a,
+        module_b=b
+    ).first()
 
 
-def find_safe(module_a, module_b):
+def find_safe(game, module_a, module_b):
     a, b = normalize_pair(module_a, module_b)
-    return SafeCombination.query.filter_by(module_a=a, module_b=b).first()
+
+    return SafeCombination.query.filter_by(
+        game=game,
+        module_a=a,
+        module_b=b
+    ).first()
 
 
 def result_from_conflict(module_a, module_b, conflict):
@@ -251,14 +496,16 @@ def result_from_conflict(module_a, module_b, conflict):
 
 
 def result_from_safe(module_a, module_b, safe):
+    impact = impact_description("None", "無明顯衝突")
+
     return {
         "module_a": module_a,
         "module_b": module_b,
         "status": "safe",
         "conflict_type": "None",
         "conflict_degree": "無明顯衝突",
-        "impact_area": "無",
-        "effect": "目前資料庫中此組合被回報為可正常共存。",
+        "impact_area": impact["impact_area"],
+        "effect": impact["effect"],
         "confidence_score": safe.confidence_score,
         "report_count": safe.report_count,
         "source": "user"
@@ -281,7 +528,7 @@ def result_from_unknown(module_a, module_b):
 
 
 def sort_results(results):
-    priority = {
+    status_priority = {
         "conflict": 0,
         "unknown": 1,
         "safe": 2
@@ -300,7 +547,7 @@ def sort_results(results):
     return sorted(
         results,
         key=lambda x: (
-            priority.get(x["status"], 9),
+            status_priority.get(x["status"], 9),
             degree_priority.get(x["conflict_degree"], 9),
             -float(x["confidence_score"])
         )
@@ -338,7 +585,11 @@ def clean_json_text(text):
     return text
 
 
-def save_ai_conflict_result(ai_data):
+# =========================
+# OpenAI
+# =========================
+
+def save_ai_conflict_result(game, ai_data):
     conflicts = ai_data.get("likely_conflicts", [])
 
     for item in conflicts:
@@ -351,18 +602,28 @@ def save_ai_conflict_result(ai_data):
         a, b = normalize_pair(module_a, module_b)
 
         conflict_type = item.get("conflict_type", "AI Predicted Conflict")
-        conflict_degree = item.get("conflict_degree") or item.get("risk") or default_degree_by_type(conflict_type)
+        conflict_degree = (
+            item.get("conflict_degree")
+            or item.get("risk")
+            or default_degree_by_type(conflict_type)
+        )
         conflict_degree = normalize_conflict_degree(conflict_degree, conflict_type)
 
-        rule = ConflictRule.query.filter_by(module_a=a, module_b=b).first()
+        rule = ConflictRule.query.filter_by(
+            game=game,
+            module_a=a,
+            module_b=b
+        ).first()
 
         if rule:
             rule.report_count += 1
             rule.confidence_score = calculate_confidence(rule.report_count)
             rule.conflict_type = conflict_type
             rule.risk = conflict_degree
+            rule.source = "openai"
         else:
             rule = ConflictRule(
+                game=game,
                 module_a=a,
                 module_b=b,
                 conflict_type=conflict_type,
@@ -376,7 +637,7 @@ def save_ai_conflict_result(ai_data):
     db.session.commit()
 
 
-def call_openai_analysis(mods, crash_log=""):
+def call_openai_analysis(game, mods, crash_log=""):
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key:
@@ -384,10 +645,24 @@ def call_openai_analysis(mods, crash_log=""):
 
     client = OpenAI(api_key=api_key)
 
+    game_label = GAME_PROFILES.get(game, GAME_PROFILES["generic"])["label"]
+
     prompt = f"""
 你是一位遊戲模組相容性分析系統。
 
-請根據以下模組列表與 crash log，分析可能的模組衝突。
+目前分析的遊戲是：
+{game_label}
+
+請根據以下模組列表與錯誤描述，分析可能的模組衝突。
+
+注意：
+1. 玩家可能只提供模組名稱，不一定提供 .esp、.esm、.jar、.dll 等副檔名。
+2. 請依照目前遊戲的模組生態判斷衝突。
+3. 如果是 Skyrim / Fallout，常見衝突包含 load order、script、skeleton、dialogue、asset。
+4. 如果是 Stardew Valley，常見衝突包含 SMAPI、Content Patcher、地圖覆蓋、事件腳本、NPC 對話。
+5. 如果是 Minecraft，常見衝突包含 loader 不相容、library 缺失、mixin crash、版本不符、渲染模組衝突。
+6. 如果是 Cyberpunk 2077，常見衝突包含 ArchiveXL、TweakXL、REDscript、CET、材質或腳本覆蓋。
+7. 如果資訊不足，請明確說明需要更多資料，不要捏造不存在的 crash log。
 
 要求：
 1. 找出最可能衝突的模組組合
@@ -404,6 +679,8 @@ def call_openai_analysis(mods, crash_log=""):
 - Asset Conflict
 - Load Order Conflict
 - Dependency Missing
+- Loader / Version Conflict
+- Map / World Conflict
 - Unknown Conflict
 
 可用衝突程度：
@@ -423,9 +700,9 @@ def call_openai_analysis(mods, crash_log=""):
 - 未知衝突：資訊不足
 
 模組列表：
-{mods}
+{json.dumps(mods, ensure_ascii=False)}
 
-Crash Log：
+錯誤描述 / Crash Log：
 {crash_log}
 
 請輸出格式：
@@ -434,8 +711,8 @@ Crash Log：
   "overall_conflict_degree": "中度功能異常",
   "likely_conflicts": [
     {{
-      "module_a": "xxx.esp",
-      "module_b": "yyy.esp",
+      "module_a": "xxx",
+      "module_b": "yyy",
       "conflict_type": "Dialogue Conflict",
       "conflict_degree": "中度功能異常",
       "impact_area": "角色 / 對話",
@@ -460,7 +737,8 @@ Crash Log：
                 "content": prompt
             }
         ],
-        temperature=0.2
+        temperature=0.2,
+        response_format={"type": "json_object"}
     )
 
     content = clean_json_text(response.choices[0].message.content)
@@ -488,18 +766,34 @@ def index():
 @app.route("/analyze", methods=["POST"])
 def analyze():
     plan = get_plan_from_request()
+    game = get_game_from_request()
     limits = PLAN_LIMITS[plan]
 
     if plan == "pro" and not is_pro_authorized():
         return jsonify({"error": "訂閱版驗證碼錯誤，或尚未開通訂閱版。"}), 403
 
     file = request.files.get("file")
+    manual_text = request.form.get("mod_text", "")
 
-    if not file:
-        return jsonify({"error": "沒有收到檔案"}), 400
+    content = ""
 
-    content = file.read().decode("utf-8", errors="ignore")
-    mods = extract_mods(content)
+    if file:
+        content += file.read().decode("utf-8", errors="ignore")
+
+    if manual_text.strip():
+        content += "\n" + manual_text
+
+    if not content.strip():
+        return jsonify({"error": "請上傳檔案或直接輸入模組名稱。"}), 400
+
+    mods = extract_mods(content, game)
+
+    if not mods:
+        return jsonify({
+            "error": "沒有辨識到模組名稱。請確認是一行一個模組，例如 SkyUI、XPMSSE、Content Patcher、Sodium。",
+            "game": game,
+            "game_label": GAME_PROFILES[game]["label"]
+        }), 400
 
     if len(mods) > limits["max_mods"]:
         return jsonify({
@@ -511,8 +805,8 @@ def analyze():
     results = []
 
     for module_a, module_b in combinations(mods, 2):
-        conflict = find_conflict(module_a, module_b)
-        safe = find_safe(module_a, module_b)
+        conflict = find_conflict(game, module_a, module_b)
+        safe = find_safe(game, module_a, module_b)
 
         if conflict:
             results.append(result_from_conflict(module_a, module_b, conflict))
@@ -525,6 +819,7 @@ def analyze():
     summary = summarize_results(results)
 
     db.session.add(RawReport(
+        game=game,
         report_type=f"{plan}_mod_list",
         content=content
     ))
@@ -534,6 +829,8 @@ def analyze():
     display_results = results[:limits["max_display_pairs"]]
 
     return jsonify({
+        "game": game,
+        "game_label": GAME_PROFILES[game]["label"],
         "plan": plan,
         "plan_name": limits["name"],
         "mods_detected": mods,
@@ -548,6 +845,7 @@ def analyze():
 @app.route("/ai_analyze", methods=["POST"])
 def ai_analyze():
     plan = get_plan_from_request()
+    game = get_game_from_request()
 
     if plan != "pro":
         return jsonify({
@@ -557,17 +855,32 @@ def ai_analyze():
     if not is_pro_authorized():
         return jsonify({"error": "訂閱版驗證碼錯誤，或尚未開通訂閱版。"}), 403
 
+    if not os.environ.get("OPENAI_API_KEY"):
+        return jsonify({"error": "伺服器尚未設定 OPENAI_API_KEY。"}), 500
+
     file = request.files.get("file")
+    manual_text = request.form.get("mod_text", "")
     crash_log = request.form.get("crash_log", "")
 
-    if not file:
-        return jsonify({"error": "沒有收到檔案"}), 400
+    content = ""
 
-    if not os.environ.get("OPENAI_API_KEY"):
-        return jsonify({"error": "伺服器尚未設定 OPENAI_API_KEY"}), 500
+    if file:
+        content += file.read().decode("utf-8", errors="ignore")
 
-    content = file.read().decode("utf-8", errors="ignore")
-    mods = extract_mods(content)
+    if manual_text.strip():
+        content += "\n" + manual_text
+
+    if not content.strip():
+        return jsonify({"error": "請上傳檔案或直接輸入模組名稱。"}), 400
+
+    mods = extract_mods(content, game)
+
+    if not mods:
+        return jsonify({
+            "error": "沒有辨識到模組名稱。請確認是一行一個模組，例如 SkyUI、XPMSSE、Content Patcher、Sodium。",
+            "game": game,
+            "game_label": GAME_PROFILES[game]["label"]
+        }), 400
 
     limits = PLAN_LIMITS["pro"]
 
@@ -577,17 +890,20 @@ def ai_analyze():
             "total_mods": len(mods)
         }), 403
 
-    ai_result = call_openai_analysis(mods, crash_log)
+    ai_result = call_openai_analysis(game, mods, crash_log)
 
     db.session.add(RawReport(
+        game=game,
         report_type="pro_ai_analysis",
-        content=content + "\n\nCrash Log:\n" + crash_log,
+        content=content + "\n\n錯誤描述 / Crash Log:\n" + crash_log,
         ai_result=json.dumps(ai_result, ensure_ascii=False)
     ))
 
-    save_ai_conflict_result(ai_result)
+    save_ai_conflict_result(game, ai_result)
 
     return jsonify({
+        "game": game,
+        "game_label": GAME_PROFILES[game]["label"],
         "plan": "pro",
         "mods_detected": mods,
         "ai_result": ai_result
@@ -597,6 +913,8 @@ def ai_analyze():
 @app.route("/report_conflict", methods=["POST"])
 def report_conflict():
     data = request.json or {}
+
+    game = get_game_from_json(data)
 
     module_a = data.get("module_a", "").strip()
     module_b = data.get("module_b", "").strip()
@@ -612,7 +930,11 @@ def report_conflict():
 
     a, b = normalize_pair(module_a, module_b)
 
-    rule = ConflictRule.query.filter_by(module_a=a, module_b=b).first()
+    rule = ConflictRule.query.filter_by(
+        game=game,
+        module_a=a,
+        module_b=b
+    ).first()
 
     if rule:
         rule.report_count += 1
@@ -621,6 +943,7 @@ def report_conflict():
         rule.risk = conflict_degree
     else:
         rule = ConflictRule(
+            game=game,
             module_a=a,
             module_b=b,
             conflict_type=conflict_type,
@@ -633,15 +956,18 @@ def report_conflict():
 
     db.session.commit()
 
-    impact = impact_description(rule.conflict_type, normalize_conflict_degree(rule.risk, rule.conflict_type))
+    degree = normalize_conflict_degree(rule.risk, rule.conflict_type)
+    impact = impact_description(rule.conflict_type, degree)
 
     return jsonify({
         "status": "success",
-        "message": "衝突回報已寫入資料庫",
+        "message": "衝突回報已寫入資料庫。",
+        "game": game,
+        "game_label": GAME_PROFILES[game]["label"],
         "module_a": a,
         "module_b": b,
         "conflict_type": rule.conflict_type,
-        "conflict_degree": normalize_conflict_degree(rule.risk, rule.conflict_type),
+        "conflict_degree": degree,
         "impact_area": impact["impact_area"],
         "effect": impact["effect"],
         "report_count": rule.report_count,
@@ -653,6 +979,8 @@ def report_conflict():
 def report_safe():
     data = request.json or {}
 
+    game = get_game_from_json(data)
+
     module_a = data.get("module_a", "").strip()
     module_b = data.get("module_b", "").strip()
 
@@ -661,13 +989,18 @@ def report_safe():
 
     a, b = normalize_pair(module_a, module_b)
 
-    safe = SafeCombination.query.filter_by(module_a=a, module_b=b).first()
+    safe = SafeCombination.query.filter_by(
+        game=game,
+        module_a=a,
+        module_b=b
+    ).first()
 
     if safe:
         safe.report_count += 1
         safe.confidence_score = calculate_confidence(safe.report_count)
     else:
         safe = SafeCombination(
+            game=game,
             module_a=a,
             module_b=b,
             report_count=1,
@@ -679,7 +1012,9 @@ def report_safe():
 
     return jsonify({
         "status": "success",
-        "message": "安全組合已寫入資料庫",
+        "message": "安全組合已寫入資料庫。",
+        "game": game,
+        "game_label": GAME_PROFILES[game]["label"],
         "module_a": a,
         "module_b": b,
         "conflict_degree": "無明顯衝突",
@@ -690,24 +1025,49 @@ def report_safe():
 
 @app.route("/stats")
 def stats():
-    conflicts = ConflictRule.query.order_by(ConflictRule.report_count.desc()).limit(50).all()
-    safes = SafeCombination.query.order_by(SafeCombination.report_count.desc()).limit(50).all()
+    game = request.args.get("game", "skyrim").lower().strip()
+
+    if game not in GAME_PROFILES:
+        game = "generic"
+
+    conflicts = (
+        ConflictRule.query
+        .filter_by(game=game)
+        .order_by(ConflictRule.report_count.desc())
+        .limit(50)
+        .all()
+    )
+
+    safes = (
+        SafeCombination.query
+        .filter_by(game=game)
+        .order_by(SafeCombination.report_count.desc())
+        .limit(50)
+        .all()
+    )
+
+    conflict_items = []
+
+    for c in conflicts:
+        degree = normalize_conflict_degree(c.risk, c.conflict_type)
+        impact = impact_description(c.conflict_type, degree)
+
+        conflict_items.append({
+            "module_a": c.module_a,
+            "module_b": c.module_b,
+            "type": c.conflict_type,
+            "conflict_degree": degree,
+            "impact_area": impact["impact_area"],
+            "effect": impact["effect"],
+            "report_count": c.report_count,
+            "confidence_score": c.confidence_score,
+            "source": c.source
+        })
 
     return jsonify({
-        "conflict_rules": [
-            {
-                "module_a": c.module_a,
-                "module_b": c.module_b,
-                "type": c.conflict_type,
-                "conflict_degree": normalize_conflict_degree(c.risk, c.conflict_type),
-                "impact_area": impact_description(c.conflict_type, normalize_conflict_degree(c.risk, c.conflict_type))["impact_area"],
-                "effect": impact_description(c.conflict_type, normalize_conflict_degree(c.risk, c.conflict_type))["effect"],
-                "report_count": c.report_count,
-                "confidence_score": c.confidence_score,
-                "source": c.source
-            }
-            for c in conflicts
-        ],
+        "game": game,
+        "game_label": GAME_PROFILES[game]["label"],
+        "conflict_rules": conflict_items,
         "safe_combinations": [
             {
                 "module_a": s.module_a,
@@ -718,12 +1078,13 @@ def stats():
             }
             for s in safes
         ],
-        "plans": PLAN_LIMITS
+        "plans": PLAN_LIMITS,
+        "games": GAME_PROFILES
     })
 
 
 with app.app_context():
-    db.create_all()
+    ensure_schema()
 
 
 if __name__ == "__main__":
