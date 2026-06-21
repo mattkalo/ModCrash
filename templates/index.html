@@ -2,75 +2,196 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Clashtest AI Mod Conflict Analyzer</title>
+    <title>ModCrash AI 衝突分析器</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 
 <body class="bg-slate-950 text-slate-200 min-h-screen">
 
-<div class="max-w-6xl mx-auto px-6 py-10">
+<div class="max-w-7xl mx-auto px-6 py-10">
 
-    <h1 class="text-4xl font-bold text-cyan-400 mb-3">
-        Clashtest AI Mod Conflict Analyzer
-    </h1>
+    <header class="mb-10">
+        <p class="text-cyan-400 font-semibold mb-2">ModCrash AI SaaS</p>
+        <h1 class="text-4xl md:text-5xl font-bold text-white mb-4">
+            遊戲模組衝突預測與相容性分析
+        </h1>
+        <p class="text-slate-400 max-w-3xl leading-relaxed">
+            上傳 plugins.txt 或 loadorder.txt，系統會比對已知衝突組合、安全組合與未知組合。
+            訂閱版可使用 OpenAI 深度分析，判斷角色、對話、腳本、地圖、材質或啟動層級的衝突程度。
+        </p>
+    </header>
 
-    <p class="text-slate-400 mb-8">
-        上傳 plugins.txt 或 loadorder.txt，系統會先比對資料庫；未知組合可交給 OpenAI 分析。
-    </p>
+    <section class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
 
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8">
-        <h2 class="text-xl font-bold mb-4">上傳模組列表</h2>
+        <label class="plan-card cursor-pointer block bg-slate-900 border border-cyan-800 rounded-2xl p-6 hover:border-cyan-400 transition">
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-cyan-300">免費版 Free</h2>
+                    <p class="text-slate-400 text-sm mt-1">適合一般玩家快速檢查</p>
+                </div>
+                <input type="radio" name="plan" value="free" checked class="w-5 h-5 accent-cyan-500">
+            </div>
 
-        <input type="file" id="fileInput" class="block w-full text-sm text-slate-300 mb-4">
+            <ul class="space-y-3 text-sm text-slate-300">
+                <li>✓ 最多分析 30 個模組</li>
+                <li>✓ 資料庫快速比對</li>
+                <li>✓ 已知衝突 / 已知安全 / 未知組合</li>
+                <li>✓ 玩家可回報正常或衝突</li>
+                <li class="text-slate-500">✕ 不含 OpenAI 深度分析</li>
+                <li class="text-slate-500">✕ 不含完整原因與處理建議</li>
+            </ul>
+        </label>
 
-        <textarea 
-            id="crashLogInput" 
-            rows="6"
-            placeholder="可選：貼上 crash log 或錯誤描述，讓 OpenAI 分析未知衝突"
-            class="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 mb-4"
-        ></textarea>
+        <label class="plan-card cursor-pointer block bg-slate-900 border border-purple-800 rounded-2xl p-6 hover:border-purple-400 transition">
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-purple-300">訂閱版 Pro</h2>
+                    <p class="text-slate-400 text-sm mt-1">適合重度玩家與模組作者</p>
+                </div>
+                <input type="radio" name="plan" value="pro" class="w-5 h-5 accent-purple-500">
+            </div>
 
-        <div class="flex flex-wrap gap-3">
-            <button onclick="analyzeFile()" class="bg-cyan-600 hover:bg-cyan-500 px-6 py-2 rounded-lg font-bold">
-                資料庫快速分析
-            </button>
+            <ul class="space-y-3 text-sm text-slate-300">
+                <li>✓ 最多分析 150 個模組</li>
+                <li>✓ 資料庫快速比對</li>
+                <li>✓ OpenAI 深度分析</li>
+                <li>✓ 衝突程度與玩家影響描述</li>
+                <li>✓ 具體處理建議</li>
+                <li>✓ 適合安裝前預測，避免下載衝突模組組合</li>
+            </ul>
+        </label>
 
-            <button onclick="aiAnalyzeFile()" class="bg-purple-600 hover:bg-purple-500 px-6 py-2 rounded-lg font-bold">
-                OpenAI 深度分析
-            </button>
+    </section>
 
-            <button onclick="loadStats()" class="bg-slate-700 hover:bg-slate-600 px-6 py-2 rounded-lg font-bold">
-                查看資料庫統計
-            </button>
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+
+        <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+
+            <h2 class="text-2xl font-bold text-white mb-4">
+                上傳模組列表
+            </h2>
+
+            <p class="text-slate-400 text-sm mb-4">
+                支援 plugins.txt、loadorder.txt。免費版只做資料庫比對；訂閱版可搭配 crash log 使用 OpenAI 深度分析。
+            </p>
+
+            <input 
+                type="file" 
+                id="fileInput" 
+                class="block w-full text-sm text-slate-300 mb-4 bg-slate-950 border border-slate-700 rounded-lg p-3"
+            >
+
+            <textarea 
+                id="crashLogInput" 
+                rows="7"
+                placeholder="訂閱版可選：貼上 crash log、錯誤訊息或玩家描述，例如：進入某地圖破圖、角色對話重複、讀檔閃退..."
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 mb-4"
+            ></textarea>
+
+            <input
+                type="text"
+                id="proCodeInput"
+                placeholder="訂閱版驗證碼，可留空。若 Render 有設定 PRO_ACCESS_CODE 才需要填。"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 mb-4"
+            >
+
+            <div class="flex flex-wrap gap-3">
+                <button onclick="analyzeFile()" class="bg-cyan-600 hover:bg-cyan-500 px-6 py-3 rounded-lg font-bold transition">
+                    資料庫快速分析
+                </button>
+
+                <button onclick="aiAnalyzeFile()" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-lg font-bold transition">
+                    OpenAI 深度分析
+                </button>
+
+                <button onclick="loadStats()" class="bg-slate-700 hover:bg-slate-600 px-6 py-3 rounded-lg font-bold transition">
+                    查看資料庫統計
+                </button>
+            </div>
         </div>
-    </div>
 
-    <div id="summary" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 hidden">
-        <div class="bg-red-950/40 border border-red-800 rounded-lg p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+            <h2 class="text-2xl font-bold text-white mb-4">
+                衝突程度說明
+            </h2>
+
+            <div class="space-y-3 text-sm">
+                <div class="p-3 bg-red-950/40 border border-red-900 rounded-lg">
+                    <strong class="text-red-300">啟動阻斷</strong>
+                    <p class="text-slate-400 mt-1">遊戲可能無法啟動或讀檔前崩潰。</p>
+                </div>
+
+                <div class="p-3 bg-orange-950/40 border border-orange-900 rounded-lg">
+                    <strong class="text-orange-300">高度崩潰風險</strong>
+                    <p class="text-slate-400 mt-1">遊戲可啟動，但讀檔、戰鬥或傳送可能崩潰。</p>
+                </div>
+
+                <div class="p-3 bg-yellow-950/40 border border-yellow-900 rounded-lg">
+                    <strong class="text-yellow-300">中度功能異常</strong>
+                    <p class="text-slate-400 mt-1">角色、任務、對話、多話或腳本可能異常。</p>
+                </div>
+
+                <div class="p-3 bg-blue-950/40 border border-blue-900 rounded-lg">
+                    <strong class="text-blue-300">視覺 / 地圖異常</strong>
+                    <p class="text-slate-400 mt-1">地圖破圖、紫色材質、模型缺失或碰撞錯誤。</p>
+                </div>
+
+                <div class="p-3 bg-slate-800 border border-slate-700 rounded-lg">
+                    <strong class="text-slate-300">輕微覆蓋</strong>
+                    <p class="text-slate-400 mt-1">通常可玩，但部分效果或設定可能被覆蓋。</p>
+                </div>
+            </div>
+        </div>
+
+    </section>
+
+    <section id="summary" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8 hidden">
+        <div class="bg-red-950/40 border border-red-800 rounded-xl p-5">
             <p class="text-sm text-red-300">衝突組合</p>
-            <p id="conflictCount" class="text-3xl font-bold text-red-400">0</p>
+            <p id="conflictCount" class="text-3xl font-bold text-red-400 mt-1">0</p>
         </div>
 
-        <div class="bg-emerald-950/40 border border-emerald-800 rounded-lg p-4">
+        <div class="bg-emerald-950/40 border border-emerald-800 rounded-xl p-5">
             <p class="text-sm text-emerald-300">安全組合</p>
-            <p id="safeCount" class="text-3xl font-bold text-emerald-400">0</p>
+            <p id="safeCount" class="text-3xl font-bold text-emerald-400 mt-1">0</p>
         </div>
 
-        <div class="bg-slate-800 border border-slate-700 rounded-lg p-4">
+        <div class="bg-slate-800 border border-slate-700 rounded-xl p-5">
             <p class="text-sm text-slate-300">未知組合</p>
-            <p id="unknownCount" class="text-3xl font-bold text-slate-300">0</p>
+            <p id="unknownCount" class="text-3xl font-bold text-slate-300 mt-1">0</p>
         </div>
-    </div>
 
-    <div id="aiResult" class="hidden bg-purple-950/30 border border-purple-800 rounded-xl p-6 mb-8"></div>
+        <div class="bg-cyan-950/40 border border-cyan-800 rounded-xl p-5">
+            <p class="text-sm text-cyan-300">已分析組合</p>
+            <p id="pairCount" class="text-3xl font-bold text-cyan-400 mt-1">0</p>
+        </div>
+    </section>
 
-    <div id="results" class="space-y-4"></div>
+    <section id="aiResult" class="hidden bg-purple-950/30 border border-purple-800 rounded-2xl p-6 mb-8"></section>
+
+    <section>
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-2xl font-bold text-white">分析結果</h2>
+            <button onclick="downloadJson()" class="hidden bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg text-sm" id="downloadBtn">
+                下載 JSON 報告
+            </button>
+        </div>
+
+        <div id="results" class="space-y-4"></div>
+    </section>
 
 </div>
 
 <script>
+let latestReport = null;
+
+function getSelectedPlan() {
+    const selected = document.querySelector("input[name='plan']:checked");
+    return selected ? selected.value : "free";
+}
+
 function escapeHtml(text) {
-    return String(text)
+    return String(text ?? "")
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
@@ -78,11 +199,63 @@ function escapeHtml(text) {
         .replaceAll("'", "&#039;");
 }
 
+function escapeAttr(text) {
+    return escapeHtml(text);
+}
+
+function degreeStyle(degree) {
+    if (degree === "啟動阻斷") {
+        return {
+            badge: "bg-red-950 text-red-300 border-red-800",
+            border: "border-red-800",
+            title: "text-red-300"
+        };
+    }
+
+    if (degree === "高度崩潰風險") {
+        return {
+            badge: "bg-orange-950 text-orange-300 border-orange-800",
+            border: "border-orange-800",
+            title: "text-orange-300"
+        };
+    }
+
+    if (degree === "中度功能異常") {
+        return {
+            badge: "bg-yellow-950 text-yellow-300 border-yellow-800",
+            border: "border-yellow-800",
+            title: "text-yellow-300"
+        };
+    }
+
+    if (degree === "視覺 / 地圖異常") {
+        return {
+            badge: "bg-blue-950 text-blue-300 border-blue-800",
+            border: "border-blue-800",
+            title: "text-blue-300"
+        };
+    }
+
+    if (degree === "無明顯衝突") {
+        return {
+            badge: "bg-emerald-950 text-emerald-300 border-emerald-800",
+            border: "border-emerald-800",
+            title: "text-emerald-300"
+        };
+    }
+
+    return {
+        badge: "bg-slate-800 text-slate-300 border-slate-700",
+        border: "border-slate-700",
+        title: "text-slate-300"
+    };
+}
+
 async function analyzeFile() {
     const fileInput = document.getElementById("fileInput");
     const resultsDiv = document.getElementById("results");
-    const summary = document.getElementById("summary");
     const aiResult = document.getElementById("aiResult");
+    const plan = getSelectedPlan();
 
     aiResult.classList.add("hidden");
 
@@ -93,9 +266,11 @@ async function analyzeFile() {
 
     const formData = new FormData();
     formData.append("file", fileInput.files[0]);
+    formData.append("plan", plan);
+    formData.append("pro_code", document.getElementById("proCodeInput").value);
 
     resultsDiv.innerHTML = `
-        <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-lg p-5">
             資料庫分析中...
         </div>
     `;
@@ -108,18 +283,28 @@ async function analyzeFile() {
     const data = await response.json();
 
     if (data.error) {
-        alert(data.error);
+        resultsDiv.innerHTML = `
+            <div class="bg-red-950/40 border border-red-800 rounded-lg p-5 text-red-300">
+                ${escapeHtml(data.error)}
+            </div>
+        `;
         return;
     }
 
-    renderResults(data.results);
-    summary.classList.remove("hidden");
+    latestReport = data;
+    renderResults(data);
 }
 
 async function aiAnalyzeFile() {
     const fileInput = document.getElementById("fileInput");
     const crashLogInput = document.getElementById("crashLogInput");
     const aiResult = document.getElementById("aiResult");
+    const plan = getSelectedPlan();
+
+    if (plan !== "pro") {
+        alert("OpenAI 深度分析屬於訂閱版功能。請先選擇訂閱版 Pro。");
+        return;
+    }
 
     if (!fileInput.files.length) {
         alert("請先選擇 plugins.txt 或 loadorder.txt");
@@ -129,9 +314,11 @@ async function aiAnalyzeFile() {
     const formData = new FormData();
     formData.append("file", fileInput.files[0]);
     formData.append("crash_log", crashLogInput.value);
+    formData.append("plan", "pro");
+    formData.append("pro_code", document.getElementById("proCodeInput").value);
 
     aiResult.classList.remove("hidden");
-    aiResult.innerHTML = `<p class="text-purple-300 font-bold">OpenAI 分析中...</p>`;
+    aiResult.innerHTML = `<p class="text-purple-300 font-bold">OpenAI 深度分析中...</p>`;
 
     const response = await fetch("/ai_analyze", {
         method: "POST",
@@ -145,48 +332,78 @@ async function aiAnalyzeFile() {
         return;
     }
 
-    const result = data.ai_result;
+    latestReport = data;
+    renderAiResult(data.ai_result);
+}
+
+function renderAiResult(result) {
+    const aiResult = document.getElementById("aiResult");
     const conflicts = result.likely_conflicts || [];
 
     aiResult.innerHTML = `
-        <h2 class="text-2xl font-bold text-purple-300 mb-3">OpenAI 分析結果</h2>
+        <div class="flex justify-between items-start mb-5">
+            <div>
+                <h2 class="text-2xl font-bold text-purple-300 mb-2">
+                    OpenAI 深度分析結果
+                </h2>
+                <p class="text-slate-400">
+                    ${escapeHtml(result.summary || "")}
+                </p>
+            </div>
 
-        <p class="text-slate-300 mb-4">
-            <strong>整體風險：</strong>${escapeHtml(result.overall_risk || "Unknown")}
-        </p>
-
-        <p class="text-slate-400 mb-6">
-            ${escapeHtml(result.summary || "")}
-        </p>
+            <span class="px-3 py-1 rounded-full border bg-purple-950 text-purple-300 border-purple-800 text-sm">
+                ${escapeHtml(result.overall_conflict_degree || "未知衝突")}
+            </span>
+        </div>
 
         <div class="space-y-4">
-            ${conflicts.map(item => `
-                <div class="bg-slate-950 border border-purple-800 rounded-lg p-4">
-                    <h3 class="font-bold text-purple-300 mb-2">
-                        ${escapeHtml(item.module_a)} + ${escapeHtml(item.module_b)}
-                    </h3>
+            ${
+                conflicts.length
+                ? conflicts.map(item => {
+                    const style = degreeStyle(item.conflict_degree);
+                    return `
+                        <div class="bg-slate-950 border ${style.border} rounded-xl p-5">
+                            <div class="flex justify-between items-start gap-4 mb-3">
+                                <h3 class="font-bold ${style.title}">
+                                    ${escapeHtml(item.module_a)} + ${escapeHtml(item.module_b)}
+                                </h3>
 
-                    <p class="text-sm text-slate-300">
-                        類型：${escapeHtml(item.conflict_type)}　
-                        風險：${escapeHtml(item.risk)}　
-                        信心：${escapeHtml(item.confidence_score)}
-                    </p>
+                                <span class="px-3 py-1 rounded-full border ${style.badge} text-xs whitespace-nowrap">
+                                    ${escapeHtml(item.conflict_degree)}
+                                </span>
+                            </div>
 
-                    <p class="text-sm text-slate-400 mt-2">
-                        原因：${escapeHtml(item.reason)}
-                    </p>
+                            <p class="text-sm text-slate-300 mb-2">
+                                <strong>衝突類型：</strong>${escapeHtml(item.conflict_type)}
+                            </p>
 
-                    <p class="text-sm text-slate-400 mt-2">
-                        建議：${escapeHtml(item.suggestion)}
-                    </p>
-                </div>
-            `).join("")}
+                            <p class="text-sm text-slate-400 mb-2">
+                                <strong>玩家影響：</strong>${escapeHtml(item.player_effect)}
+                            </p>
+
+                            <p class="text-sm text-slate-400 mb-2">
+                                <strong>判斷原因：</strong>${escapeHtml(item.reason)}
+                            </p>
+
+                            <p class="text-sm text-slate-400">
+                                <strong>建議處理：</strong>${escapeHtml(item.suggestion)}
+                            </p>
+                        </div>
+                    `;
+                }).join("")
+                : `<p class="text-slate-400">OpenAI 未找到明確衝突組合。</p>`
+            }
         </div>
     `;
+
+    document.getElementById("downloadBtn").classList.remove("hidden");
 }
 
-function renderResults(results) {
+function renderResults(data) {
     const resultsDiv = document.getElementById("results");
+    const summary = document.getElementById("summary");
+
+    const results = data.results || [];
 
     let conflictCount = 0;
     let safeCount = 0;
@@ -195,56 +412,71 @@ function renderResults(results) {
     resultsDiv.innerHTML = "";
 
     results.forEach(item => {
-        let color = "slate";
-        let label = "未知組合";
-
         if (item.status === "conflict") {
-            color = "red";
-            label = "已知衝突";
             conflictCount++;
         } else if (item.status === "safe") {
-            color = "emerald";
-            label = "已知安全";
             safeCount++;
         } else {
             unknownCount++;
         }
 
+        const style = degreeStyle(item.conflict_degree);
+
+        const label =
+            item.status === "conflict"
+                ? "已知衝突"
+                : item.status === "safe"
+                    ? "已知安全"
+                    : "未知組合";
+
         resultsDiv.innerHTML += `
-            <div class="bg-slate-900 border border-${color}-800 rounded-lg p-4">
-                <div class="flex justify-between items-center mb-2">
-                    <h3 class="font-bold text-${color}-400">${label}</h3>
-                    <span class="text-sm text-slate-400">
-                        信任分數：${item.confidence_score}
+            <div class="bg-slate-900 border ${style.border} rounded-xl p-5">
+                <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-3">
+                    <div>
+                        <h3 class="font-bold ${style.title} mb-1">
+                            ${escapeHtml(label)}
+                        </h3>
+
+                        <p class="text-sm text-slate-300">
+                            <strong>${escapeHtml(item.module_a)}</strong>
+                            <span class="text-slate-500"> + </span>
+                            <strong>${escapeHtml(item.module_b)}</strong>
+                        </p>
+                    </div>
+
+                    <span class="px-3 py-1 rounded-full border ${style.badge} text-xs whitespace-nowrap">
+                        ${escapeHtml(item.conflict_degree)}
                     </span>
                 </div>
 
-                <p class="text-sm text-slate-300">
-                    <strong>${escapeHtml(item.module_a)}</strong>
-                    <span class="text-slate-500"> + </span>
-                    <strong>${escapeHtml(item.module_b)}</strong>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-slate-400">
+                    <p><strong class="text-slate-300">衝突類型：</strong>${escapeHtml(item.conflict_type)}</p>
+                    <p><strong class="text-slate-300">影響區域：</strong>${escapeHtml(item.impact_area)}</p>
+                    <p><strong class="text-slate-300">信任分數：</strong>${escapeHtml(item.confidence_score)}</p>
+                    <p><strong class="text-slate-300">回報次數：</strong>${escapeHtml(item.report_count)}</p>
+                </div>
+
+                <p class="text-sm text-slate-400 mt-3">
+                    <strong class="text-slate-300">玩家可能遇到：</strong>${escapeHtml(item.effect)}
                 </p>
 
-                <p class="text-sm text-slate-400 mt-2">
-                    類型：${escapeHtml(item.conflict_type)}　
-                    風險：${escapeHtml(item.risk)}　
-                    回報次數：${item.report_count}　
-                    來源：${escapeHtml(item.source)}
-                </p>
-
-                <div class="mt-3 flex gap-2">
+                <div class="mt-4 flex flex-wrap gap-2">
                     <button 
-                        onclick="reportSafe('${escapeHtml(item.module_a)}', '${escapeHtml(item.module_b)}')"
-                        class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-sm"
+                        data-action="safe"
+                        data-a="${escapeAttr(item.module_a)}"
+                        data-b="${escapeAttr(item.module_b)}"
+                        class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-2 rounded text-sm"
                     >
-                        回報正常
+                        回報此組合正常
                     </button>
 
                     <button 
-                        onclick="reportConflict('${escapeHtml(item.module_a)}', '${escapeHtml(item.module_b)}')"
-                        class="bg-red-700 hover:bg-red-600 text-white px-3 py-1 rounded text-sm"
+                        data-action="conflict"
+                        data-a="${escapeAttr(item.module_a)}"
+                        data-b="${escapeAttr(item.module_b)}"
+                        class="bg-red-700 hover:bg-red-600 text-white px-3 py-2 rounded text-sm"
                     >
-                        回報衝突
+                        回報此組合有問題
                     </button>
                 </div>
             </div>
@@ -254,7 +486,29 @@ function renderResults(results) {
     document.getElementById("conflictCount").innerText = conflictCount;
     document.getElementById("safeCount").innerText = safeCount;
     document.getElementById("unknownCount").innerText = unknownCount;
+    document.getElementById("pairCount").innerText = data.total_pairs_checked || results.length;
+
+    summary.classList.remove("hidden");
+    document.getElementById("downloadBtn").classList.remove("hidden");
 }
+
+document.addEventListener("click", async function(event) {
+    const button = event.target.closest("[data-action]");
+
+    if (!button) return;
+
+    const action = button.dataset.action;
+    const moduleA = button.dataset.a;
+    const moduleB = button.dataset.b;
+
+    if (action === "safe") {
+        await reportSafe(moduleA, moduleB);
+    }
+
+    if (action === "conflict") {
+        await reportConflict(moduleA, moduleB);
+    }
+});
 
 async function reportSafe(moduleA, moduleB) {
     const response = await fetch("/report_safe", {
@@ -267,12 +521,19 @@ async function reportSafe(moduleA, moduleB) {
     });
 
     const data = await response.json();
-    alert(data.message);
+    alert(data.message || "已回報");
 }
 
 async function reportConflict(moduleA, moduleB) {
-    const conflictType = prompt("請輸入衝突類型，例如 Script Override / Skeleton Conflict：", "Unknown Conflict");
-    const risk = prompt("請輸入風險等級 High / Medium / Low：", "Medium");
+    const conflictType = prompt(
+        "請輸入衝突類型，例如 Script Override / Skeleton Conflict / Dialogue Conflict / Asset Conflict：",
+        "Unknown Conflict"
+    );
+
+    const conflictDegree = prompt(
+        "請輸入衝突程度：啟動阻斷 / 高度崩潰風險 / 中度功能異常 / 視覺 / 地圖異常 / 輕微覆蓋",
+        "中度功能異常"
+    );
 
     const response = await fetch("/report_conflict", {
         method: "POST",
@@ -281,19 +542,19 @@ async function reportConflict(moduleA, moduleB) {
             module_a: moduleA,
             module_b: moduleB,
             conflict_type: conflictType || "Unknown Conflict",
-            risk: risk || "Medium"
+            conflict_degree: conflictDegree || "中度功能異常"
         })
     });
 
     const data = await response.json();
-    alert(data.message);
+    alert(data.message || "已回報");
 }
 
 async function loadStats() {
     const resultsDiv = document.getElementById("results");
 
     resultsDiv.innerHTML = `
-        <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-lg p-5">
             載入統計中...
         </div>
     `;
@@ -301,36 +562,87 @@ async function loadStats() {
     const response = await fetch("/stats");
     const data = await response.json();
 
-    resultsDiv.innerHTML = `
-        <h2 class="text-2xl font-bold text-cyan-400 mb-4">衝突資料庫</h2>
-        ${data.conflict_rules.map(item => `
-            <div class="bg-slate-900 border border-red-800 rounded-lg p-4 mb-3">
-                <h3 class="font-bold text-red-400">
-                    ${escapeHtml(item.module_a)} + ${escapeHtml(item.module_b)}
-                </h3>
-                <p class="text-sm text-slate-400">
-                    類型：${escapeHtml(item.type)}　
-                    風險：${escapeHtml(item.risk)}　
-                    回報：${item.report_count}　
-                    信任：${item.confidence_score}　
-                    來源：${escapeHtml(item.source)}
-                </p>
-            </div>
-        `).join("")}
+    latestReport = data;
 
-        <h2 class="text-2xl font-bold text-emerald-400 mt-8 mb-4">安全組合資料庫</h2>
-        ${data.safe_combinations.map(item => `
-            <div class="bg-slate-900 border border-emerald-800 rounded-lg p-4 mb-3">
-                <h3 class="font-bold text-emerald-400">
-                    ${escapeHtml(item.module_a)} + ${escapeHtml(item.module_b)}
-                </h3>
-                <p class="text-sm text-slate-400">
-                    回報：${item.report_count}　
-                    信任：${item.confidence_score}
-                </p>
-            </div>
-        `).join("")}
+    resultsDiv.innerHTML = `
+        <h2 class="text-2xl font-bold text-red-300 mb-4">衝突資料庫</h2>
+
+        ${
+            data.conflict_rules.length
+            ? data.conflict_rules.map(item => {
+                const style = degreeStyle(item.conflict_degree);
+                return `
+                    <div class="bg-slate-900 border ${style.border} rounded-xl p-5 mb-3">
+                        <div class="flex justify-between items-start gap-3">
+                            <h3 class="font-bold ${style.title}">
+                                ${escapeHtml(item.module_a)} + ${escapeHtml(item.module_b)}
+                            </h3>
+
+                            <span class="px-3 py-1 rounded-full border ${style.badge} text-xs whitespace-nowrap">
+                                ${escapeHtml(item.conflict_degree)}
+                            </span>
+                        </div>
+
+                        <p class="text-sm text-slate-400 mt-2">
+                            類型：${escapeHtml(item.type)}　
+                            影響區域：${escapeHtml(item.impact_area)}　
+                            回報：${escapeHtml(item.report_count)}　
+                            信任：${escapeHtml(item.confidence_score)}　
+                            來源：${escapeHtml(item.source)}
+                        </p>
+
+                        <p class="text-sm text-slate-500 mt-2">
+                            ${escapeHtml(item.effect)}
+                        </p>
+                    </div>
+                `;
+            }).join("")
+            : `<p class="text-slate-400 mb-6">目前尚無衝突資料。</p>`
+        }
+
+        <h2 class="text-2xl font-bold text-emerald-300 mt-8 mb-4">安全組合資料庫</h2>
+
+        ${
+            data.safe_combinations.length
+            ? data.safe_combinations.map(item => `
+                <div class="bg-slate-900 border border-emerald-800 rounded-xl p-5 mb-3">
+                    <h3 class="font-bold text-emerald-300">
+                        ${escapeHtml(item.module_a)} + ${escapeHtml(item.module_b)}
+                    </h3>
+
+                    <p class="text-sm text-slate-400 mt-2">
+                        衝突程度：無明顯衝突　
+                        回報：${escapeHtml(item.report_count)}　
+                        信任：${escapeHtml(item.confidence_score)}
+                    </p>
+                </div>
+            `).join("")
+            : `<p class="text-slate-400">目前尚無安全組合資料。</p>`
+        }
     `;
+
+    document.getElementById("downloadBtn").classList.remove("hidden");
+}
+
+function downloadJson() {
+    if (!latestReport) {
+        alert("目前沒有可下載的報告");
+        return;
+    }
+
+    const blob = new Blob(
+        [JSON.stringify(latestReport, null, 2)],
+        { type: "application/json" }
+    );
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+
+    a.href = url;
+    a.download = "modcrash_report.json";
+    a.click();
+
+    URL.revokeObjectURL(url);
 }
 </script>
 
