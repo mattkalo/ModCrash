@@ -2,37 +2,47 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Clashtest Mod Conflict Analyzer</title>
+    <title>Clashtest AI Mod Conflict Analyzer</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 
 <body class="bg-slate-950 text-slate-200 min-h-screen">
 
-<div class="max-w-5xl mx-auto px-6 py-10">
+<div class="max-w-6xl mx-auto px-6 py-10">
 
     <h1 class="text-4xl font-bold text-cyan-400 mb-3">
-        Clashtest Mod Conflict Analyzer
+        Clashtest AI Mod Conflict Analyzer
     </h1>
 
     <p class="text-slate-400 mb-8">
-        上傳 plugins.txt 或 loadorder.txt，系統會比對已知衝突組合、安全組合與未知組合。
+        上傳 plugins.txt 或 loadorder.txt，系統會先比對資料庫；未知組合可交給 OpenAI 分析。
     </p>
 
     <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8">
         <h2 class="text-xl font-bold mb-4">上傳模組列表</h2>
 
-        <input 
-            type="file" 
-            id="fileInput" 
-            class="block w-full text-sm text-slate-300 mb-4"
-        >
+        <input type="file" id="fileInput" class="block w-full text-sm text-slate-300 mb-4">
 
-        <button 
-            onclick="analyzeFile()" 
-            class="bg-cyan-600 hover:bg-cyan-500 px-6 py-2 rounded-lg font-bold"
-        >
-            開始分析
-        </button>
+        <textarea 
+            id="crashLogInput" 
+            rows="6"
+            placeholder="可選：貼上 crash log 或錯誤描述，讓 OpenAI 分析未知衝突"
+            class="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 mb-4"
+        ></textarea>
+
+        <div class="flex flex-wrap gap-3">
+            <button onclick="analyzeFile()" class="bg-cyan-600 hover:bg-cyan-500 px-6 py-2 rounded-lg font-bold">
+                資料庫快速分析
+            </button>
+
+            <button onclick="aiAnalyzeFile()" class="bg-purple-600 hover:bg-purple-500 px-6 py-2 rounded-lg font-bold">
+                OpenAI 深度分析
+            </button>
+
+            <button onclick="loadStats()" class="bg-slate-700 hover:bg-slate-600 px-6 py-2 rounded-lg font-bold">
+                查看資料庫統計
+            </button>
+        </div>
     </div>
 
     <div id="summary" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 hidden">
@@ -52,15 +62,29 @@
         </div>
     </div>
 
+    <div id="aiResult" class="hidden bg-purple-950/30 border border-purple-800 rounded-xl p-6 mb-8"></div>
+
     <div id="results" class="space-y-4"></div>
 
 </div>
 
 <script>
+function escapeHtml(text) {
+    return String(text)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
 async function analyzeFile() {
     const fileInput = document.getElementById("fileInput");
     const resultsDiv = document.getElementById("results");
     const summary = document.getElementById("summary");
+    const aiResult = document.getElementById("aiResult");
+
+    aiResult.classList.add("hidden");
 
     if (!fileInput.files.length) {
         alert("請先選擇 plugins.txt 或 loadorder.txt");
@@ -72,7 +96,7 @@ async function analyzeFile() {
 
     resultsDiv.innerHTML = `
         <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
-            分析中...
+            資料庫分析中...
         </div>
     `;
 
@@ -83,13 +107,94 @@ async function analyzeFile() {
 
     const data = await response.json();
 
+    if (data.error) {
+        alert(data.error);
+        return;
+    }
+
+    renderResults(data.results);
+    summary.classList.remove("hidden");
+}
+
+async function aiAnalyzeFile() {
+    const fileInput = document.getElementById("fileInput");
+    const crashLogInput = document.getElementById("crashLogInput");
+    const aiResult = document.getElementById("aiResult");
+
+    if (!fileInput.files.length) {
+        alert("請先選擇 plugins.txt 或 loadorder.txt");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+    formData.append("crash_log", crashLogInput.value);
+
+    aiResult.classList.remove("hidden");
+    aiResult.innerHTML = `<p class="text-purple-300 font-bold">OpenAI 分析中...</p>`;
+
+    const response = await fetch("/ai_analyze", {
+        method: "POST",
+        body: formData
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+        aiResult.innerHTML = `<p class="text-red-400">${escapeHtml(data.error)}</p>`;
+        return;
+    }
+
+    const result = data.ai_result;
+    const conflicts = result.likely_conflicts || [];
+
+    aiResult.innerHTML = `
+        <h2 class="text-2xl font-bold text-purple-300 mb-3">OpenAI 分析結果</h2>
+
+        <p class="text-slate-300 mb-4">
+            <strong>整體風險：</strong>${escapeHtml(result.overall_risk || "Unknown")}
+        </p>
+
+        <p class="text-slate-400 mb-6">
+            ${escapeHtml(result.summary || "")}
+        </p>
+
+        <div class="space-y-4">
+            ${conflicts.map(item => `
+                <div class="bg-slate-950 border border-purple-800 rounded-lg p-4">
+                    <h3 class="font-bold text-purple-300 mb-2">
+                        ${escapeHtml(item.module_a)} + ${escapeHtml(item.module_b)}
+                    </h3>
+
+                    <p class="text-sm text-slate-300">
+                        類型：${escapeHtml(item.conflict_type)}　
+                        風險：${escapeHtml(item.risk)}　
+                        信心：${escapeHtml(item.confidence_score)}
+                    </p>
+
+                    <p class="text-sm text-slate-400 mt-2">
+                        原因：${escapeHtml(item.reason)}
+                    </p>
+
+                    <p class="text-sm text-slate-400 mt-2">
+                        建議：${escapeHtml(item.suggestion)}
+                    </p>
+                </div>
+            `).join("")}
+        </div>
+    `;
+}
+
+function renderResults(results) {
+    const resultsDiv = document.getElementById("results");
+
     let conflictCount = 0;
     let safeCount = 0;
     let unknownCount = 0;
 
     resultsDiv.innerHTML = "";
 
-    data.results.forEach(item => {
+    results.forEach(item => {
         let color = "slate";
         let label = "未知組合";
 
@@ -115,27 +220,28 @@ async function analyzeFile() {
                 </div>
 
                 <p class="text-sm text-slate-300">
-                    <strong>${item.module_a}</strong>
+                    <strong>${escapeHtml(item.module_a)}</strong>
                     <span class="text-slate-500"> + </span>
-                    <strong>${item.module_b}</strong>
+                    <strong>${escapeHtml(item.module_b)}</strong>
                 </p>
 
                 <p class="text-sm text-slate-400 mt-2">
-                    類型：${item.conflict_type}　
-                    風險：${item.risk}　
-                    回報次數：${item.report_count}
+                    類型：${escapeHtml(item.conflict_type)}　
+                    風險：${escapeHtml(item.risk)}　
+                    回報次數：${item.report_count}　
+                    來源：${escapeHtml(item.source)}
                 </p>
 
                 <div class="mt-3 flex gap-2">
                     <button 
-                        onclick="reportSafe('${item.module_a}', '${item.module_b}')"
+                        onclick="reportSafe('${escapeHtml(item.module_a)}', '${escapeHtml(item.module_b)}')"
                         class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-sm"
                     >
                         回報正常
                     </button>
 
                     <button 
-                        onclick="reportConflict('${item.module_a}', '${item.module_b}')"
+                        onclick="reportConflict('${escapeHtml(item.module_a)}', '${escapeHtml(item.module_b)}')"
                         class="bg-red-700 hover:bg-red-600 text-white px-3 py-1 rounded text-sm"
                     >
                         回報衝突
@@ -148,16 +254,12 @@ async function analyzeFile() {
     document.getElementById("conflictCount").innerText = conflictCount;
     document.getElementById("safeCount").innerText = safeCount;
     document.getElementById("unknownCount").innerText = unknownCount;
-
-    summary.classList.remove("hidden");
 }
 
 async function reportSafe(moduleA, moduleB) {
     const response = await fetch("/report_safe", {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
+        headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
             module_a: moduleA,
             module_b: moduleB
@@ -169,22 +271,66 @@ async function reportSafe(moduleA, moduleB) {
 }
 
 async function reportConflict(moduleA, moduleB) {
-    const crashLog = prompt("可貼上 crash log 或錯誤描述，沒有也可以空白：");
+    const conflictType = prompt("請輸入衝突類型，例如 Script Override / Skeleton Conflict：", "Unknown Conflict");
+    const risk = prompt("請輸入風險等級 High / Medium / Low：", "Medium");
 
     const response = await fetch("/report_conflict", {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
+        headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
             module_a: moduleA,
             module_b: moduleB,
-            crash_log: crashLog || ""
+            conflict_type: conflictType || "Unknown Conflict",
+            risk: risk || "Medium"
         })
     });
 
     const data = await response.json();
     alert(data.message);
+}
+
+async function loadStats() {
+    const resultsDiv = document.getElementById("results");
+
+    resultsDiv.innerHTML = `
+        <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+            載入統計中...
+        </div>
+    `;
+
+    const response = await fetch("/stats");
+    const data = await response.json();
+
+    resultsDiv.innerHTML = `
+        <h2 class="text-2xl font-bold text-cyan-400 mb-4">衝突資料庫</h2>
+        ${data.conflict_rules.map(item => `
+            <div class="bg-slate-900 border border-red-800 rounded-lg p-4 mb-3">
+                <h3 class="font-bold text-red-400">
+                    ${escapeHtml(item.module_a)} + ${escapeHtml(item.module_b)}
+                </h3>
+                <p class="text-sm text-slate-400">
+                    類型：${escapeHtml(item.type)}　
+                    風險：${escapeHtml(item.risk)}　
+                    回報：${item.report_count}　
+                    信任：${item.confidence_score}　
+                    來源：${escapeHtml(item.source)}
+                </p>
+            </div>
+        `).join("")}
+
+        <h2 class="text-2xl font-bold text-emerald-400 mt-8 mb-4">安全組合資料庫</h2>
+        ${data.safe_combinations.map(item => `
+            <div class="bg-slate-900 border border-emerald-800 rounded-lg p-4 mb-3">
+                <h3 class="font-bold text-emerald-400">
+                    ${escapeHtml(item.module_a)} + ${escapeHtml(item.module_b)}
+                </h3>
+                <p class="text-sm text-slate-400">
+                    回報：${item.report_count}　
+                    信任：${item.confidence_score}
+                </p>
+            </div>
+        `).join("")}
+    `;
 }
 </script>
 
