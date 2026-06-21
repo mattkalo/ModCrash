@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>Clashtest Mod Conflict Analyzer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-slate-950 text-slate-200 min-h-screen">
+
+<div class="max-w-5xl mx-auto px-6 py-10">
+
+    <h1 class="text-4xl font-bold text-cyan-400 mb-3">
+        Clashtest Mod Conflict Analyzer
+    </h1>
+
+    <p class="text-slate-400 mb-8">
+        上傳 plugins.txt 或 loadorder.txt，系統會比對已知衝突組合、安全組合與未知組合。
+    </p>
+
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8">
+        <h2 class="text-xl font-bold mb-4">上傳模組列表</h2>
+
+        <input 
+            type="file" 
+            id="fileInput" 
+            class="block w-full text-sm text-slate-300 mb-4"
+        >
+
+        <button 
+            onclick="analyzeFile()" 
+            class="bg-cyan-600 hover:bg-cyan-500 px-6 py-2 rounded-lg font-bold"
+        >
+            開始分析
+        </button>
+    </div>
+
+    <div id="summary" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 hidden">
+        <div class="bg-red-950/40 border border-red-800 rounded-lg p-4">
+            <p class="text-sm text-red-300">衝突組合</p>
+            <p id="conflictCount" class="text-3xl font-bold text-red-400">0</p>
+        </div>
+
+        <div class="bg-emerald-950/40 border border-emerald-800 rounded-lg p-4">
+            <p class="text-sm text-emerald-300">安全組合</p>
+            <p id="safeCount" class="text-3xl font-bold text-emerald-400">0</p>
+        </div>
+
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-4">
+            <p class="text-sm text-slate-300">未知組合</p>
+            <p id="unknownCount" class="text-3xl font-bold text-slate-300">0</p>
+        </div>
+    </div>
+
+    <div id="results" class="space-y-4"></div>
+
+</div>
+
+<script>
+async function analyzeFile() {
+    const fileInput = document.getElementById("fileInput");
+    const resultsDiv = document.getElementById("results");
+    const summary = document.getElementById("summary");
+
+    if (!fileInput.files.length) {
+        alert("請先選擇 plugins.txt 或 loadorder.txt");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+
+    resultsDiv.innerHTML = `
+        <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+            分析中...
+        </div>
+    `;
+
+    const response = await fetch("/analyze", {
+        method: "POST",
+        body: formData
+    });
+
+    const data = await response.json();
+
+    let conflictCount = 0;
+    let safeCount = 0;
+    let unknownCount = 0;
+
+    resultsDiv.innerHTML = "";
+
+    data.results.forEach(item => {
+        let color = "slate";
+        let label = "未知組合";
+
+        if (item.status === "conflict") {
+            color = "red";
+            label = "已知衝突";
+            conflictCount++;
+        } else if (item.status === "safe") {
+            color = "emerald";
+            label = "已知安全";
+            safeCount++;
+        } else {
+            unknownCount++;
+        }
+
+        resultsDiv.innerHTML += `
+            <div class="bg-slate-900 border border-${color}-800 rounded-lg p-4">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="font-bold text-${color}-400">${label}</h3>
+                    <span class="text-sm text-slate-400">
+                        信任分數：${item.confidence_score}
+                    </span>
+                </div>
+
+                <p class="text-sm text-slate-300">
+                    <strong>${item.module_a}</strong>
+                    <span class="text-slate-500"> + </span>
+                    <strong>${item.module_b}</strong>
+                </p>
+
+                <p class="text-sm text-slate-400 mt-2">
+                    類型：${item.conflict_type}　
+                    風險：${item.risk}　
+                    回報次數：${item.report_count}
+                </p>
+
+                <div class="mt-3 flex gap-2">
+                    <button 
+                        onclick="reportSafe('${item.module_a}', '${item.module_b}')"
+                        class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-sm"
+                    >
+                        回報正常
+                    </button>
+
+                    <button 
+                        onclick="reportConflict('${item.module_a}', '${item.module_b}')"
+                        class="bg-red-700 hover:bg-red-600 text-white px-3 py-1 rounded text-sm"
+                    >
+                        回報衝突
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+
+    document.getElementById("conflictCount").innerText = conflictCount;
+    document.getElementById("safeCount").innerText = safeCount;
+    document.getElementById("unknownCount").innerText = unknownCount;
+
+    summary.classList.remove("hidden");
+}
+
+async function reportSafe(moduleA, moduleB) {
+    const response = await fetch("/report_safe", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            module_a: moduleA,
+            module_b: moduleB
+        })
+    });
+
+    const data = await response.json();
+    alert(data.message);
+}
+
+async function reportConflict(moduleA, moduleB) {
+    const crashLog = prompt("可貼上 crash log 或錯誤描述，沒有也可以空白：");
+
+    const response = await fetch("/report_conflict", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            module_a: moduleA,
+            module_b: moduleB,
+            crash_log: crashLog || ""
+        })
+    });
+
+    const data = await response.json();
+    alert(data.message);
+}
+</script>
+
+</body>
+</html>
