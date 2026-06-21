@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}分析器｜ModCrash AI{% endblock %}
+{% block content %}
+<div class="mb-8">
+    <p class="text-cyan-300 font-semibold mb-2">Analyzer</p>
+    <h1 class="text-4xl font-black text-white mb-3">模組相容性分析器</h1>
+    <p class="text-slate-400">直接輸入模組名稱，一行一個。快速分析會比對資料庫；OpenAI 深度分析會清空快速分析結果並顯示 AI 報告。</p>
+</div>
+
+<section class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+    <div class="lg:col-span-2 glass border border-slate-800 rounded-3xl p-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="block text-sm text-slate-300 mb-2">選擇遊戲</label>
+                <select id="gameSelect" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3">
+                    {% for key, game in games.items() %}
+                        <option value="{{ key }}">{{ game.badge }} {{ game.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm text-slate-300 mb-2">目前方案</label>
+                <div class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-slate-300">
+                    {{ active_plan.zh_name }} / {{ active_plan.name }}｜模組上限 {{ active_plan.max_mods }}
+                </div>
+            </div>
+        </div>
+
+        <label class="block text-sm text-slate-300 mb-2">上傳檔案，可選</label>
+        <input type="file" id="fileInput" class="block w-full text-sm text-slate-300 mb-4 bg-slate-950 border border-slate-700 rounded-xl p-3">
+
+        <label class="block text-sm text-slate-300 mb-2">直接輸入模組名稱</label>
+        <textarea id="modTextInput" rows="9" placeholder="一行一個模組名稱，例如：
+SkyUI
+XPMSSE
+Serana Dialogue Add-On
+Content Patcher
+Stardew Valley Expanded
+Sodium
+Create" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 mb-4"></textarea>
+
+        <label class="block text-sm text-slate-300 mb-2">錯誤描述 / Crash Log，OpenAI 可選</label>
+        <textarea id="crashLogInput" rows="6" placeholder="例如：遊戲可以啟動，但進入戰鬥後角色動作異常；NPC 對話重複；進入地圖時破圖。" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 mb-4"></textarea>
+
+        <div class="flex flex-wrap gap-3">
+            <button onclick="analyzeFile()" class="bg-cyan-600 hover:bg-cyan-500 px-6 py-3 rounded-xl font-bold text-white">資料庫快速分析</button>
+            <button onclick="aiAnalyzeFile()" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-bold text-white">OpenAI 深度分析</button>
+            <button onclick="seedDemoData()" class="bg-indigo-700 hover:bg-indigo-600 px-6 py-3 rounded-xl font-bold text-white">建立示範資料</button>
+        </div>
+    </div>
+
+    <div class="glass border border-slate-800 rounded-3xl p-6">
+        <h2 class="text-2xl font-bold text-white mb-4">衝突程度</h2>
+        <div class="space-y-3 text-sm">
+            <div class="p-3 bg-red-950/40 border border-red-900 rounded-xl"><b class="text-red-300">啟動阻斷</b><p class="text-slate-400 mt-1">遊戲可能無法啟動或讀檔前崩潰。</p></div>
+            <div class="p-3 bg-orange-950/40 border border-orange-900 rounded-xl"><b class="text-orange-300">高度崩潰風險</b><p class="text-slate-400 mt-1">可啟動，但讀檔、戰鬥、傳送可能崩潰。</p></div>
+            <div class="p-3 bg-yellow-950/40 border border-yellow-900 rounded-xl"><b class="text-yellow-300">中度功能異常</b><p class="text-slate-400 mt-1">角色、任務、對話、多話或腳本可能異常。</p></div>
+            <div class="p-3 bg-blue-950/40 border border-blue-900 rounded-xl"><b class="text-blue-300">視覺 / 地圖異常</b><p class="text-slate-400 mt-1">地圖破圖、模型缺失、紫色材質。</p></div>
+            <div class="p-3 bg-emerald-950/30 border border-emerald-900 rounded-xl"><b class="text-emerald-300">無明顯衝突</b><p class="text-slate-400 mt-1">資料庫中被回報為正常共存。</p></div>
+        </div>
+    </div>
+</section>
+
+<section id="summary" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8 hidden">
+    <div class="bg-red-950/40 border border-red-800 rounded-xl p-5"><p class="text-sm text-red-300">衝突組合</p><p id="conflictCount" class="text-3xl font-bold text-red-400 mt-1">0</p></div>
+    <div class="bg-emerald-950/40 border border-emerald-800 rounded-xl p-5"><p class="text-sm text-emerald-300">安全組合</p><p id="safeCount" class="text-3xl font-bold text-emerald-400 mt-1">0</p></div>
+    <div class="bg-slate-800 border border-slate-700 rounded-xl p-5"><p class="text-sm text-slate-300">未知組合</p><p id="unknownCount" class="text-3xl font-bold text-slate-300 mt-1">0</p></div>
+    <div class="bg-cyan-950/40 border border-cyan-800 rounded-xl p-5"><p class="text-sm text-cyan-300">已分析組合</p><p id="pairCount" class="text-3xl font-bold text-cyan-400 mt-1">0</p></div>
+</section>
+
+<section id="modsDetected" class="hidden glass border border-slate-800 rounded-2xl p-6 mb-8"></section>
+<section id="aiResult" class="hidden bg-purple-950/30 border border-purple-800 rounded-2xl p-6 mb-8"></section>
+
+<section>
+    <div class="flex justify-between items-center mb-4">
+        <h2 class="text-2xl font-bold text-white">分析結果</h2>
+        <button onclick="downloadJson()" class="hidden bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg text-sm" id="downloadBtn">下載 JSON 報告</button>
+    </div>
+    <div id="results" class="space-y-4"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let latestReport = null;
+function escapeHtml(text) { return String(text ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'", '&#039;'); }
+function degreeStyle(degree) {
+    if (degree === '啟動阻斷') return {badge:'bg-red-950 text-red-300 border-red-800', border:'border-red-800', title:'text-red-300'};
+    if (degree === '高度崩潰風險') return {badge:'bg-orange-950 text-orange-300 border-orange-800', border:'border-orange-800', title:'text-orange-300'};
+    if (degree === '中度功能異常') return {badge:'bg-yellow-950 text-yellow-300 border-yellow-800', border:'border-yellow-800', title:'text-yellow-300'};
+    if (degree === '視覺 / 地圖異常') return {badge:'bg-blue-950 text-blue-300 border-blue-800', border:'border-blue-800', title:'text-blue-300'};
+    if (degree === '無明顯衝突') return {badge:'bg-emerald-950 text-emerald-300 border-emerald-800', border:'border-emerald-800', title:'text-emerald-300'};
+    return {badge:'bg-slate-800 text-slate-300 border-slate-700', border:'border-slate-700', title:'text-slate-300'};
+}
+function getPayload() {
+    const fileInput = document.getElementById('fileInput');
+    const modText = document.getElementById('modTextInput').value.trim();
+    if (!fileInput.files.length && !modText) { alert('請上傳檔案，或直接輸入模組名稱。'); return null; }
+    const fd = new FormData();
+    if (fileInput.files.length) fd.append('file', fileInput.files[0]);
+    fd.append('mod_text', document.getElementById('modTextInput').value);
+    fd.append('game', document.getElementById('gameSelect').value);
+    return fd;
+}
+function clearQuickResults() {
+    document.getElementById('results').innerHTML = '';
+    document.getElementById('summary').classList.add('hidden');
+    document.getElementById('modsDetected').classList.add('hidden');
+    document.getElementById('downloadBtn').classList.add('hidden');
+}
+function renderDetectedMods(data) {
+    const box = document.getElementById('modsDetected');
+    const mods = data.mods_detected || [];
+    box.classList.remove('hidden');
+    box.innerHTML = `<div class="flex justify-between items-start gap-4 mb-4"><div><h2 class="text-xl font-bold text-white">已辨識模組</h2><p class="text-sm text-slate-400 mt-1">遊戲：${escapeHtml(data.game_label)}｜方案：${escapeHtml(data.plan_name || '')}${data.usage ? '｜今日使用：' + data.usage.used + '/' + data.usage.limit : ''}</p></div><span class="px-3 py-1 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800 text-sm">${mods.length} 個模組</span></div><div class="flex flex-wrap gap-2">${mods.map(m => `<span class="px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-xs">${escapeHtml(m)}</span>`).join('')}</div>`;
+}
+async function analyzeFile() {
+    document.getElementById('aiResult').classList.add('hidden');
+    const fd = getPayload(); if (!fd) return;
+    document.getElementById('results').innerHTML = `<div class="bg-slate-900 border border-slate-800 rounded-xl p-5">資料庫分析中...</div>`;
+    const res = await fetch('/api/analyze', {method:'POST', body:fd});
+    const data = await res.json();
+    if (data.error) { document.getElementById('results').innerHTML = `<div class="bg-red-950/40 border border-red-800 rounded-xl p-5 text-red-300">${escapeHtml(data.error)}</div>`; return; }
+    latestReport = data; renderDetectedMods(data); renderResults(data);
+}
+async function aiAnalyzeFile() {
+    clearQuickResults();
+    const fd = getPayload(); if (!fd) return;
+    fd.append('crash_log', document.getElementById('crashLogInput').value);
+    const ai = document.getElementById('aiResult'); ai.classList.remove('hidden'); ai.innerHTML = `<p class="text-purple-300 font-bold">OpenAI 深度分析中...</p>`;
+    const res = await fetch('/api/ai_analyze', {method:'POST', body:fd});
+    const data = await res.json();
+    if (data.error) { ai.innerHTML = `<div class="bg-red-950/40 border border-red-800 rounded-xl p-5 text-red-300">${escapeHtml(data.error)}</div>`; return; }
+    latestReport = data; renderDetectedMods(data); renderAiResult(data.ai_result);
+}
+function renderAiResult(result) {
+    const ai = document.getElementById('aiResult');
+    const conflicts = result.likely_conflicts || [];
+    ai.innerHTML = `<div class="flex flex-col md:flex-row md:justify-between gap-4 mb-5"><div><h2 class="text-2xl font-bold text-purple-300 mb-2">OpenAI 深度分析結果</h2><p class="text-slate-400">${escapeHtml(result.summary || '')}</p></div><span class="px-3 py-1 rounded-full border bg-purple-950 text-purple-300 border-purple-800 text-sm whitespace-nowrap">${escapeHtml(result.overall_conflict_degree || '未知衝突')}</span></div><div class="space-y-4">${conflicts.length ? conflicts.map(item => { const s = degreeStyle(item.conflict_degree); return `<div class="bg-slate-950 border ${s.border} rounded-xl p-5"><div class="flex flex-col md:flex-row md:justify-between gap-4 mb-3"><h3 class="font-bold ${s.title}">${escapeHtml(item.module_a)} + ${escapeHtml(item.module_b)}</h3><span class="px-3 py-1 rounded-full border ${s.badge} text-xs whitespace-nowrap">${escapeHtml(item.conflict_degree)}</span></div><p class="text-sm text-slate-300 mb-2"><b>衝突類型：</b>${escapeHtml(item.conflict_type)}</p><p class="text-sm text-slate-400 mb-2"><b>影響區域：</b>${escapeHtml(item.impact_area)}</p><p class="text-sm text-slate-400 mb-2"><b>玩家可能遇到：</b>${escapeHtml(item.player_effect)}</p><p class="text-sm text-slate-400 mb-2"><b>判斷原因：</b>${escapeHtml(item.reason)}</p><p class="text-sm text-slate-400"><b>建議處理：</b>${escapeHtml(item.suggestion)}</p></div>`; }).join('') : `<div class="bg-slate-950 border border-slate-800 rounded-xl p-5 text-slate-400">OpenAI 未找到明確衝突組合。請補充錯誤描述或 crash log。</div>`}</div>`;
+    document.getElementById('downloadBtn').classList.remove('hidden');
+}
+function renderResults(data) {
+    const results = data.results || [];
+    let conflictCount=0, safeCount=0, unknownCount=0;
+    const div = document.getElementById('results'); div.innerHTML = '';
+    if (!results.length) { div.innerHTML = `<div class="bg-slate-900 border border-slate-800 rounded-xl p-5 text-slate-400">沒有可顯示的組合。請至少輸入兩個模組。</div>`; return; }
+    results.forEach(item => {
+        if (item.status === 'conflict') conflictCount++; else if (item.status === 'safe') safeCount++; else unknownCount++;
+        const s = degreeStyle(item.conflict_degree);
+        const label = item.status === 'conflict' ? '已知衝突' : item.status === 'safe' ? '已知安全' : '未知組合';
+        div.innerHTML += `<div class="bg-slate-900 border ${s.border} rounded-xl p-5"><div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-3"><div><h3 class="font-bold ${s.title} mb-1">${escapeHtml(label)}</h3><p class="text-sm text-slate-300"><b>${escapeHtml(item.module_a)}</b><span class="text-slate-500"> + </span><b>${escapeHtml(item.module_b)}</b></p></div><span class="px-3 py-1 rounded-full border ${s.badge} text-xs whitespace-nowrap">${escapeHtml(item.conflict_degree)}</span></div><div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-slate-400"><p><b class="text-slate-300">衝突類型：</b>${escapeHtml(item.conflict_type)}</p><p><b class="text-slate-300">影響區域：</b>${escapeHtml(item.impact_area)}</p><p><b class="text-slate-300">信任分數：</b>${escapeHtml(item.confidence_score)}</p><p><b class="text-slate-300">來源：</b>${escapeHtml(item.source)}</p></div><p class="text-sm text-slate-400 mt-3"><b class="text-slate-300">玩家可能遇到：</b>${escapeHtml(item.effect)}</p><div class="mt-4 flex flex-wrap gap-2"><button data-action="safe" data-a="${escapeHtml(item.module_a)}" data-b="${escapeHtml(item.module_b)}" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-2 rounded text-sm">回報此組合正常</button><button data-action="conflict" data-a="${escapeHtml(item.module_a)}" data-b="${escapeHtml(item.module_b)}" class="bg-red-700 hover:bg-red-600 text-white px-3 py-2 rounded text-sm">回報此組合有問題</button></div></div>`;
+    });
+    document.getElementById('conflictCount').innerText = conflictCount;
+    document.getElementById('safeCount').innerText = safeCount;
+    document.getElementById('unknownCount').innerText = unknownCount;
+    document.getElementById('pairCount').innerText = data.total_pairs_checked || results.length;
+    document.getElementById('summary').classList.remove('hidden');
+    document.getElementById('downloadBtn').classList.remove('hidden');
+}
+document.addEventListener('click', async e => {
+    const btn = e.target.closest('[data-action]'); if (!btn) return;
+    if (btn.dataset.action === 'safe') await reportSafe(btn.dataset.a, btn.dataset.b);
+    if (btn.dataset.action === 'conflict') await reportConflict(btn.dataset.a, btn.dataset.b);
+});
+async function reportSafe(a,b) {
+    const res = await fetch('/api/report_safe', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({game:document.getElementById('gameSelect').value,module_a:a,module_b:b})});
+    const data = await res.json(); alert(data.message || data.error || '完成');
+}
+async function reportConflict(a,b) {
+    const type = prompt('請輸入衝突類型，例如 Script Override / Skeleton Conflict / Dialogue Conflict / Asset Conflict：','Unknown Conflict');
+    const degree = prompt('請輸入衝突程度：啟動阻斷 / 高度崩潰風險 / 中度功能異常 / 視覺 / 地圖異常 / 輕微覆蓋','中度功能異常');
+    const res = await fetch('/api/report_conflict', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({game:document.getElementById('gameSelect').value,module_a:a,module_b:b,conflict_type:type || 'Unknown Conflict',conflict_degree:degree || '中度功能異常'})});
+    const data = await res.json(); alert(data.message || data.error || '完成');
+}
+async function seedDemoData() {
+    const res = await fetch('/api/seed_demo', {method:'POST'});
+    const data = await res.json(); alert(data.message || data.error || '完成');
+}
+function downloadJson() {
+    if (!latestReport) { alert('目前沒有可下載的報告'); return; }
+    const blob = new Blob([JSON.stringify(latestReport, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = 'modcrash_report.json'; a.click(); URL.revokeObjectURL(url);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}登入｜ModCrash AI{% endblock %}
+{% block content %}
+<div class="max-w-xl mx-auto glass border border-slate-800 rounded-3xl p-8">
+    <h1 class="text-3xl font-bold text-white mb-6">登入</h1>
+    <form method="POST" class="space-y-4">
+        <div>
+            <label class="block text-sm text-slate-300 mb-2">帳號或 Email</label>
+            <input name="account" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3" required>
+        </div>
+        <div>
+            <label class="block text-sm text-slate-300 mb-2">密碼</label>
+            <input name="password" type="password" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3" required>
+        </div>
+        <button class="w-full bg-cyan-600 hover:bg-cyan-500 px-6 py-3 rounded-xl font-bold text-white">登入</button>
+    </form>
+</div>
+{% endblock %}
