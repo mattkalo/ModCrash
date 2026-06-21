@@ -2,8 +2,10 @@ from flask import Flask, render_template, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from itertools import combinations
 from datetime import datetime
+from openai import OpenAI
 import os
 import re
+import json
 
 app = Flask(__name__)
 
@@ -18,10 +20,9 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 
-# =========================
-# Database Models
-# =========================
 
 class ConflictRule(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -31,6 +32,7 @@ class ConflictRule(db.Model):
     risk = db.Column(db.String(50), default="Medium")
     report_count = db.Column(db.Integer, default=1)
     confidence_score = db.Column(db.Float, default=0.5)
+    source = db.Column(db.String(50), default="user")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
@@ -47,87 +49,151 @@ class RawReport(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     report_type = db.Column(db.String(50), nullable=False)
     content = db.Column(db.Text, nullable=False)
+    ai_result = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
-# =========================
-# Utility Functions
-# =========================
-
 def normalize_pair(a, b):
-    a = a.strip()
-    b = b.strip()
+    a = a.replace("*", "").strip()
+    b = b.replace("*", "").strip()
     return tuple(sorted([a, b]))
 
 
 def extract_mods(text):
-    """
-    從 plugins.txt / crash log 中抓出 .esp / .esm / .esl 模組名稱
-    """
-    pattern = r"[\w\-\s\[\]\(\)]+?\.(esp|esm|esl)"
-    matches = re.findall(pattern, text, flags=re.IGNORECASE)
-
     mods = []
-    for line in text.splitlines():
-        line = line.strip()
-        if line.lower().endswith((".esp", ".esm", ".esl")):
-            clean = line.replace("*", "").strip()
-            mods.append(clean)
 
-    # 去重
+    for line in text.splitlines():
+        line = line.strip().replace("*", "")
+
+        match = re.search(r"[\w\-\s\[\]\(\)']+\.(esp|esm|esl)", line, re.IGNORECASE)
+
+        if match:
+            mod_name = match.group(0).strip()
+            mods.append(mod_name)
+
     return sorted(list(set(mods)))
 
 
-def guess_conflict_type(text):
-    lower = text.lower()
-
-    if "skeleton" in lower or "bone" in lower:
-        return "Skeleton Conflict", "High"
-
-    if "script" in lower or "papyrus" in lower:
-        return "Script Override", "Medium"
-
-    if "dialogue" in lower or "dialog" in lower:
-        return "Dialogue Conflict", "Medium"
-
-    if "texture" in lower or "mesh" in lower or "asset" in lower:
-        return "Asset Conflict", "Low"
-
-    if "load order" in lower or "sort" in lower:
-        return "Load Order Conflict", "Medium"
-
-    return "Unknown Conflict", "Medium"
-
-
 def calculate_confidence(count):
-    """
-    回報次數越多，信任分數越高
-    """
-    score = min(0.35 + count * 0.08, 0.98)
-    return round(score, 2)
+    return round(min(0.35 + count * 0.08, 0.98), 2)
 
 
 def find_conflict(module_a, module_b):
     a, b = normalize_pair(module_a, module_b)
-
-    return ConflictRule.query.filter_by(
-        module_a=a,
-        module_b=b
-    ).first()
+    return ConflictRule.query.filter_by(module_a=a, module_b=b).first()
 
 
 def find_safe(module_a, module_b):
     a, b = normalize_pair(module_a, module_b)
-
-    return SafeCombination.query.filter_by(
-        module_a=a,
-        module_b=b
-    ).first()
+    return SafeCombination.query.filter_by(module_a=a, module_b=b).first()
 
 
-# =========================
-# Routes
-# =========================
+def save_ai_conflict_result(ai_data):
+    conflicts = ai_data.get("likely_conflicts", [])
+
+    for item in conflicts:
+        module_a = item.get("module_a", "").strip()
+        module_b = item.get("module_b", "").strip()
+
+        if not module_a or not module_b:
+            continue
+
+        a, b = normalize_pair(module_a, module_b)
+
+        rule = ConflictRule.query.filter_by(module_a=a, module_b=b).first()
+
+        if rule:
+            rule.report_count += 1
+            rule.confidence_score = calculate_confidence(rule.report_count)
+            rule.conflict_type = item.get("conflict_type", rule.conflict_type)
+            rule.risk = item.get("risk", rule.risk)
+        else:
+            rule = ConflictRule(
+                module_a=a,
+                module_b=b,
+                conflict_type=item.get("conflict_type", "AI Predicted Conflict"),
+                risk=item.get("risk", "Medium"),
+                report_count=1,
+                confidence_score=float(item.get("confidence_score", 0.55)),
+                source="openai"
+            )
+            db.session.add(rule)
+
+    db.session.commit()
+
+
+def call_openai_analysis(mods, crash_log=""):
+    prompt = f"""
+你是一位遊戲模組相容性分析系統。
+
+請根據以下模組列表與 crash log，分析可能的模組衝突。
+
+要求：
+1. 找出最可能衝突的模組組合
+2. 判斷衝突類型
+3. 判斷風險等級
+4. 給玩家具體處理建議
+5. 輸出必須是 JSON，不要 Markdown
+
+可用衝突類型：
+- Skeleton Conflict
+- Script Override
+- Dialogue Conflict
+- Asset Conflict
+- Load Order Conflict
+- Dependency Missing
+- Unknown Conflict
+
+風險等級：
+- High
+- Medium
+- Low
+
+模組列表：
+{mods}
+
+Crash Log：
+{crash_log}
+
+請輸出格式：
+{{
+  "summary": "整體分析摘要",
+  "likely_conflicts": [
+    {{
+      "module_a": "xxx.esp",
+      "module_b": "yyy.esp",
+      "conflict_type": "Script Override",
+      "risk": "High",
+      "confidence_score": 0.75,
+      "reason": "判斷原因",
+      "suggestion": "建議處理方式"
+    }}
+  ],
+  "overall_risk": "Medium"
+}}
+"""
+
+    response = client.chat.completions.create(
+        model=OPENAI_MODEL,
+        messages=[
+            {"role": "system", "content": "你是專業的遊戲模組衝突分析助理，只輸出 JSON。"},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2
+    )
+
+    content = response.choices[0].message.content
+
+    try:
+        return json.loads(content)
+    except Exception:
+        return {
+            "summary": "OpenAI 回傳格式無法解析，但仍保留原始內容。",
+            "likely_conflicts": [],
+            "overall_risk": "Unknown",
+            "raw_output": content
+        }
+
 
 @app.route("/")
 def index():
@@ -136,12 +202,6 @@ def index():
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    """
-    玩家只上傳模組列表，系統判斷：
-    1. 已知衝突
-    2. 已知安全
-    3. 未知組合
-    """
     file = request.files.get("file")
 
     if not file:
@@ -149,11 +209,6 @@ def analyze():
 
     content = file.read().decode("utf-8", errors="ignore")
     mods = extract_mods(content)
-
-    RawReport(
-        report_type="mod_list",
-        content=content
-    )
 
     results = []
 
@@ -169,7 +224,8 @@ def analyze():
                 "conflict_type": conflict.conflict_type,
                 "risk": conflict.risk,
                 "confidence_score": conflict.confidence_score,
-                "report_count": conflict.report_count
+                "report_count": conflict.report_count,
+                "source": conflict.source
             })
 
         elif safe:
@@ -180,7 +236,8 @@ def analyze():
                 "conflict_type": "None",
                 "risk": "Low",
                 "confidence_score": safe.confidence_score,
-                "report_count": safe.report_count
+                "report_count": safe.report_count,
+                "source": "user"
             })
 
         else:
@@ -191,7 +248,8 @@ def analyze():
                 "conflict_type": "Unknown",
                 "risk": "Unknown",
                 "confidence_score": 0,
-                "report_count": 0
+                "report_count": 0,
+                "source": "none"
             })
 
     db.session.add(RawReport(
@@ -208,30 +266,55 @@ def analyze():
     })
 
 
+@app.route("/ai_analyze", methods=["POST"])
+def ai_analyze():
+    file = request.files.get("file")
+    crash_log = request.form.get("crash_log", "")
+
+    if not file:
+        return jsonify({"error": "沒有收到檔案"}), 400
+
+    content = file.read().decode("utf-8", errors="ignore")
+    mods = extract_mods(content)
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        return jsonify({"error": "伺服器尚未設定 OPENAI_API_KEY"}), 500
+
+    ai_result = call_openai_analysis(mods, crash_log)
+
+    db.session.add(RawReport(
+        report_type="ai_analysis",
+        content=content + "\n\nCrash Log:\n" + crash_log,
+        ai_result=json.dumps(ai_result, ensure_ascii=False)
+    ))
+
+    save_ai_conflict_result(ai_result)
+
+    return jsonify({
+        "mods_detected": mods,
+        "ai_result": ai_result
+    })
+
+
 @app.route("/report_conflict", methods=["POST"])
 def report_conflict():
-    """
-    玩家回報：這兩個模組會衝突
-    """
     data = request.json
 
     module_a = data.get("module_a", "").strip()
     module_b = data.get("module_b", "").strip()
-    crash_log = data.get("crash_log", "")
+    conflict_type = data.get("conflict_type", "User Reported Conflict")
+    risk = data.get("risk", "Medium")
 
     if not module_a or not module_b:
         return jsonify({"error": "module_a 與 module_b 必填"}), 400
 
     a, b = normalize_pair(module_a, module_b)
-    conflict_type, risk = guess_conflict_type(crash_log)
 
     rule = ConflictRule.query.filter_by(module_a=a, module_b=b).first()
 
     if rule:
         rule.report_count += 1
         rule.confidence_score = calculate_confidence(rule.report_count)
-        rule.conflict_type = conflict_type
-        rule.risk = risk
     else:
         rule = ConflictRule(
             module_a=a,
@@ -239,14 +322,10 @@ def report_conflict():
             conflict_type=conflict_type,
             risk=risk,
             report_count=1,
-            confidence_score=calculate_confidence(1)
+            confidence_score=calculate_confidence(1),
+            source="user"
         )
         db.session.add(rule)
-
-    db.session.add(RawReport(
-        report_type="conflict_report",
-        content=crash_log
-    ))
 
     db.session.commit()
 
@@ -255,8 +334,6 @@ def report_conflict():
         "message": "衝突回報已寫入資料庫",
         "module_a": a,
         "module_b": b,
-        "conflict_type": rule.conflict_type,
-        "risk": rule.risk,
         "report_count": rule.report_count,
         "confidence_score": rule.confidence_score
     })
@@ -264,9 +341,6 @@ def report_conflict():
 
 @app.route("/report_safe", methods=["POST"])
 def report_safe():
-    """
-    玩家回報：這兩個模組可正常共存
-    """
     data = request.json
 
     module_a = data.get("module_a", "").strip()
@@ -305,8 +379,8 @@ def report_safe():
 
 @app.route("/stats")
 def stats():
-    conflicts = ConflictRule.query.order_by(ConflictRule.report_count.desc()).all()
-    safes = SafeCombination.query.order_by(SafeCombination.report_count.desc()).all()
+    conflicts = ConflictRule.query.order_by(ConflictRule.report_count.desc()).limit(50).all()
+    safes = SafeCombination.query.order_by(SafeCombination.report_count.desc()).limit(50).all()
 
     return jsonify({
         "conflict_rules": [
@@ -316,7 +390,8 @@ def stats():
                 "type": c.conflict_type,
                 "risk": c.risk,
                 "report_count": c.report_count,
-                "confidence_score": c.confidence_score
+                "confidence_score": c.confidence_score,
+                "source": c.source
             }
             for c in conflicts
         ],
@@ -332,8 +407,7 @@ def stats():
     })
 
 
-@app.before_request
-def create_tables():
+with app.app_context():
     db.create_all()
 
 
