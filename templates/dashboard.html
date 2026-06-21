@@ -1,61 +1,39 @@
 {% extends "base.html" %}
-{% block title %}儀表板｜ModCrash AI{% endblock %}
+{% block title %}儀表板 - ModCrash AI{% endblock %}
 {% block content %}
-<div class="mb-8">
-    <p class="text-cyan-300 font-semibold mb-2">Dashboard</p>
-    <h1 class="text-4xl font-black text-white mb-3">{{ current_user.username }} 的儀表板</h1>
-    <p class="text-slate-400">目前方案：{{ plan.zh_name }} / {{ plan.name }}</p>
-</div>
+<h1 class="text-4xl font-bold text-white mb-4">會員儀表板</h1>
 
 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-    <div class="glass border border-slate-800 rounded-2xl p-6">
-        <p class="text-sm text-slate-400">今日快速分析</p>
-        <p class="text-4xl font-bold text-cyan-300 mt-2">{{ analyze_used }} / {{ plan.daily_analyze_limit }}</p>
+    <div class="bg-slate-900/85 border border-slate-800 rounded-2xl p-6">
+        <p class="text-slate-400 text-sm">目前方案</p>
+        <p class="text-3xl font-bold text-cyan-300">{{ plan.name }}</p>
     </div>
-    <div class="glass border border-slate-800 rounded-2xl p-6">
-        <p class="text-sm text-slate-400">今日 OpenAI 分析</p>
-        <p class="text-4xl font-bold text-purple-300 mt-2">{{ ai_used }} / {{ plan.daily_ai_limit }}</p>
+    <div class="bg-slate-900/85 border border-slate-800 rounded-2xl p-6">
+        <p class="text-slate-400 text-sm">今日快速分析</p>
+        <p class="text-3xl font-bold text-white">{{ analyze_used }} / {{ plan.daily_analyze_limit }}</p>
     </div>
-    <div class="glass border border-slate-800 rounded-2xl p-6">
-        <p class="text-sm text-slate-400">單次模組上限</p>
-        <p class="text-4xl font-bold text-emerald-300 mt-2">{{ plan.max_mods }}</p>
+    <div class="bg-slate-900/85 border border-slate-800 rounded-2xl p-6">
+        <p class="text-slate-400 text-sm">今日 AI 分析</p>
+        <p class="text-3xl font-bold text-white">{{ ai_used }} / {{ plan.daily_ai_limit }}</p>
     </div>
 </div>
 
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <div class="glass border border-slate-800 rounded-2xl p-6">
-        <h2 class="text-2xl font-bold text-white mb-4">快速操作</h2>
-        <div class="flex flex-wrap gap-3">
-            <a href="{{ url_for('analyzer_page') }}" class="px-5 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 font-bold text-white">開啟分析器</a>
-            <a href="{{ url_for('pricing') }}" class="px-5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-white">切換方案</a>
-            <button onclick="seedDemoData()" class="px-5 py-3 rounded-xl bg-indigo-700 hover:bg-indigo-600 font-bold text-white">建立示範資料</button>
-        </div>
-        <p class="text-xs text-slate-500 mt-4">示範資料會加入部分安全組合與衝突組合，方便課堂展示資料庫統計。</p>
-    </div>
-
-    <div class="glass border border-slate-800 rounded-2xl p-6">
-        <h2 class="text-2xl font-bold text-white mb-4">最近分析</h2>
-        {% if recent %}
-            <div class="space-y-3">
-                {% for item in recent %}
-                <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-4">
-                    <p class="font-bold text-slate-200">{{ item.report_type }} / {{ item.game }}</p>
-                    <p class="text-xs text-slate-500">{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
-                </div>
-                {% endfor %}
-            </div>
-        {% else %}
-            <p class="text-slate-400">尚無分析紀錄。</p>
-        {% endif %}
-    </div>
+<div class="bg-slate-900/85 border border-slate-800 rounded-2xl p-6 mb-8">
+    <h2 class="text-2xl font-bold text-white mb-4">示範資料</h2>
+    <p class="text-slate-400 mb-4">第一次部署後可以按這個按鈕建立示範衝突與安全組合，避免資料庫空白。</p>
+    <button onclick="seedDemo()" class="bg-indigo-700 hover:bg-indigo-600 px-6 py-3 rounded-lg font-bold">建立示範資料</button>
 </div>
-{% endblock %}
-{% block scripts %}
+
+<div class="flex gap-3">
+    <a href="{{ url_for('analyzer') }}" class="bg-cyan-600 hover:bg-cyan-500 px-6 py-3 rounded-lg font-bold">前往分析器</a>
+    <a href="{{ url_for('pricing') }}" class="bg-slate-800 hover:bg-slate-700 px-6 py-3 rounded-lg font-bold">切換方案</a>
+</div>
+
 <script>
-async function seedDemoData() {
-    const response = await fetch('/api/seed_demo', {method: 'POST'});
+async function seedDemo() {
+    const response = await fetch("/api/seed_demo", { method: "POST" });
     const data = await response.json();
-    alert(data.message || '完成');
+    alert(data.message || "完成");
 }
 </script>
 {% endblock %}

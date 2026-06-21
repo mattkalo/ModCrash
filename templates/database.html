@@ -1,55 +1,47 @@
 {% extends "base.html" %}
-{% block title %}資料庫｜ModCrash AI{% endblock %}
+{% block title %}公開資料庫 - ModCrash AI{% endblock %}
 {% block content %}
-<div class="mb-8">
-    <p class="text-cyan-300 font-semibold mb-2">Knowledge Base</p>
-    <h1 class="text-4xl font-black text-white mb-3">公開相容性資料庫</h1>
-    <p class="text-slate-400">依遊戲分區查看已知衝突與已知安全組合。</p>
+<h1 class="text-4xl font-bold text-white mb-4">公開資料庫統計</h1>
+<p class="text-slate-400 mb-6">可依遊戲查看目前累積的衝突規則與安全組合。</p>
+
+<div class="bg-slate-900/85 border border-slate-800 rounded-2xl p-6 mb-6">
+    <select id="gameSelect" class="bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-200">
+        {% for key, game in games.items() %}
+        <option value="{{ key }}">{{ game.icon }} {{ game.label }}</option>
+        {% endfor %}
+    </select>
+    <button onclick="loadStats()" class="bg-cyan-600 hover:bg-cyan-500 px-5 py-3 rounded-lg font-bold ml-2">查詢</button>
 </div>
 
-<form method="GET" class="glass border border-slate-800 rounded-2xl p-5 mb-8">
-    <label class="block text-sm text-slate-300 mb-2">選擇遊戲</label>
-    <div class="flex gap-3">
-        <select name="game" class="flex-1 bg-slate-950 border border-slate-700 rounded-xl p-3">
-            {% for key, game in games.items() %}
-                <option value="{{ key }}" {% if selected_game == key %}selected{% endif %}>{{ game.badge }} {{ game.label }}</option>
-            {% endfor %}
-        </select>
-        <button class="px-6 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 font-bold text-white">查詢</button>
-    </div>
-</form>
+<div id="results" class="space-y-4"></div>
 
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <div class="glass border border-red-900/60 rounded-2xl p-6">
-        <h2 class="text-2xl font-bold text-red-300 mb-4">衝突資料庫</h2>
-        {% if conflicts %}
-            <div class="space-y-3">
-                {% for c in conflicts %}
-                <div class="bg-slate-950/70 border border-red-900/50 rounded-xl p-4">
-                    <p class="font-bold text-red-200">{{ c.module_a }} + {{ c.module_b }}</p>
-                    <p class="text-sm text-slate-400 mt-1">類型：{{ c.conflict_type }}｜衝突程度：{{ c.risk }}｜回報：{{ c.report_count }}｜來源：{{ c.source }}</p>
-                </div>
-                {% endfor %}
-            </div>
-        {% else %}
-            <p class="text-slate-400">目前尚無衝突資料。可到儀表板建立示範資料。</p>
-        {% endif %}
-    </div>
+<script>
+function escapeHtml(text) {
+    return String(text ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
+}
+async function loadStats() {
+    const game = document.getElementById("gameSelect").value;
+    const box = document.getElementById("results");
+    box.innerHTML = `<div class="bg-slate-900 border border-slate-800 rounded-xl p-5">載入中...</div>`;
+    const res = await fetch(`/api/stats?game=${encodeURIComponent(game)}`);
+    const data = await res.json();
+    box.innerHTML = `
+        <h2 class="text-2xl font-bold text-red-300">衝突資料庫</h2>
+        ${data.conflict_rules.length ? data.conflict_rules.map(x => `
+            <div class="bg-slate-900 border border-red-900 rounded-xl p-5">
+                <h3 class="font-bold text-red-300">${escapeHtml(x.module_a)} + ${escapeHtml(x.module_b)}</h3>
+                <p class="text-sm text-slate-400 mt-2">程度：${escapeHtml(x.conflict_degree)}｜類型：${escapeHtml(x.type)}｜回報：${x.report_count}｜來源：${escapeHtml(x.source)}</p>
+                <p class="text-sm text-slate-500 mt-2">${escapeHtml(x.effect)}</p>
+            </div>`).join("") : `<p class="text-slate-400">目前尚無衝突資料。</p>`}
 
-    <div class="glass border border-emerald-900/60 rounded-2xl p-6">
-        <h2 class="text-2xl font-bold text-emerald-300 mb-4">安全組合資料庫</h2>
-        {% if safes %}
-            <div class="space-y-3">
-                {% for s in safes %}
-                <div class="bg-slate-950/70 border border-emerald-900/50 rounded-xl p-4">
-                    <p class="font-bold text-emerald-200">{{ s.module_a }} + {{ s.module_b }}</p>
-                    <p class="text-sm text-slate-400 mt-1">回報：{{ s.report_count }}｜信任：{{ s.confidence_score }}｜來源：{{ s.source }}</p>
-                </div>
-                {% endfor %}
-            </div>
-        {% else %}
-            <p class="text-slate-400">目前尚無安全組合資料。安全資料需要玩家回報正常，或由系統多次觀察後累積。</p>
-        {% endif %}
-    </div>
-</div>
+        <h2 class="text-2xl font-bold text-emerald-300 mt-8">安全組合資料庫</h2>
+        ${data.safe_combinations.length ? data.safe_combinations.map(x => `
+            <div class="bg-slate-900 border border-emerald-900 rounded-xl p-5">
+                <h3 class="font-bold text-emerald-300">${escapeHtml(x.module_a)} + ${escapeHtml(x.module_b)}</h3>
+                <p class="text-sm text-slate-400 mt-2">回報：${x.report_count}｜信任：${x.confidence_score}｜來源：${escapeHtml(x.source)}</p>
+            </div>`).join("") : `<p class="text-slate-400">目前尚無安全組合資料。</p>`}
+    `;
+}
+loadStats();
+</script>
 {% endblock %}

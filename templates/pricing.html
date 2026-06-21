@@ -1,36 +1,26 @@
 {% extends "base.html" %}
-{% block title %}方案｜ModCrash AI{% endblock %}
+{% block title %}方案 - ModCrash AI{% endblock %}
 {% block content %}
-<div class="mb-10">
-    <p class="text-cyan-300 font-semibold mb-2">Pricing</p>
-    <h1 class="text-4xl font-black text-white mb-4">免費版與訂閱等級</h1>
-    <p class="text-slate-400 max-w-3xl">此版本為展示用 SaaS 方案。登入後可以直接切換方案，用來測試每日限制、模組上傳上限與 OpenAI 分析權限。</p>
-</div>
+<h1 class="text-4xl font-bold text-white mb-4">方案與限制</h1>
+<p class="text-slate-400 mb-8">不同方案對應不同每日分析次數、AI 次數與模組上限。</p>
 
-<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
     {% for key, plan in plans.items() %}
-    <div class="glass border {% if key == 'pro' %}border-purple-500{% else %}border-slate-800{% endif %} rounded-3xl p-6 flex flex-col">
-        <div class="mb-5">
-            <p class="text-sm text-slate-400">{{ plan.zh_name }}</p>
-            <h2 class="text-3xl font-bold text-white">{{ plan.name }}</h2>
-            <p class="text-cyan-300 font-bold mt-2">{{ plan.price }}</p>
-        </div>
-        <ul class="space-y-3 text-sm text-slate-300 flex-1">
+    <div class="bg-slate-900/85 border border-slate-800 rounded-2xl p-6">
+        <h2 class="text-2xl font-bold text-cyan-300">{{ plan.name }}</h2>
+        <p class="text-3xl font-bold text-white my-4">{{ plan.price }}</p>
+        <ul class="text-sm text-slate-300 space-y-3 mb-6">
             <li>每日快速分析：{{ plan.daily_analyze_limit }} 次</li>
-            <li>每日 OpenAI 分析：{{ plan.daily_ai_limit }} 次</li>
+            <li>每日 AI 分析：{{ plan.daily_ai_limit }} 次</li>
             <li>單次模組上限：{{ plan.max_mods }} 個</li>
-            <li>OpenAI：{% if plan.allow_ai %}支援{% else %}不支援{% endif %}</li>
-            <li class="text-slate-500">{{ plan.description }}</li>
+            <li>AI 分析：{{ "可用" if plan.allow_ai else "不可用" }}</li>
         </ul>
-        {% if current_user %}
-        <form method="POST" action="{{ url_for('change_plan') }}" class="mt-6">
-            <input type="hidden" name="plan" value="{{ key }}">
-            <button class="w-full px-4 py-3 rounded-xl {% if current_user.plan == key %}bg-emerald-700{% else %}bg-slate-800 hover:bg-slate-700{% endif %} font-bold text-white">
-                {% if current_user.plan == key %}目前方案{% else %}切換成 {{ plan.name }}{% endif %}
-            </button>
+        {% if current_user.is_authenticated %}
+        <form method="POST" action="{{ url_for('switch_plan', plan_key=key) }}">
+            <button class="w-full bg-cyan-600 hover:bg-cyan-500 py-2 rounded-lg font-bold">切換到此方案</button>
         </form>
         {% else %}
-        <a href="{{ url_for('register') }}" class="mt-6 block text-center px-4 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 font-bold text-white">建立帳號</a>
+        <a href="{{ url_for('register') }}" class="block text-center bg-cyan-600 hover:bg-cyan-500 py-2 rounded-lg font-bold">註冊使用</a>
         {% endif %}
     </div>
     {% endfor %}
