@@ -84,3 +84,13 @@ observe_count >= AUTO_SAFE_THRESHOLD
 - `unknown_observation_total`：累積觀察次數總和
 
 大型模組列表不再永遠只記錄前 100 組未知配對，而是隨機抽樣 UNKNOWN_OBSERVE_LIMIT 組，讓重複分析可以逐步累積不同配對。
+
+
+## OpenAI Safe Writeback
+
+本版本支援 OpenAI 安全組合回寫：
+
+- `likely_conflicts` → 寫入 `ConflictRule`，source=`openai`
+- `likely_safe_combinations` → 寫入 `SafeCombination`，source=`openai_safe`
+- 若同一配對已存在於 `ConflictRule`，不會被寫入安全組合，避免衝突資料被覆蓋成安全。
+- AI 原始回覆仍會保存到 `RawReport`。

@@ -184,7 +184,8 @@ function conflictDegreeStyle(degree) {
 }
 
 function sourceLabel(source) {
-    if (source === "openai") return "OpenAI";
+    if (source === "openai") return "OpenAI 衝突";
+    if (source === "openai_safe") return "OpenAI 安全";
     if (source === "demo") return "Demo";
     if (source === "user") return "玩家回報";
     if (source === "auto_candidate") return "自動候選";
@@ -193,6 +194,7 @@ function sourceLabel(source) {
 
 function sourceStyle(source) {
     if (source === "openai") return "bg-purple-950 text-purple-300 border-purple-800";
+    if (source === "openai_safe") return "bg-emerald-950 text-emerald-300 border-emerald-800";
     if (source === "demo") return "bg-indigo-950 text-indigo-300 border-indigo-800";
     if (source === "user") return "bg-cyan-950 text-cyan-300 border-cyan-800";
     if (source === "auto_candidate") return "bg-emerald-950 text-emerald-300 border-emerald-800";
