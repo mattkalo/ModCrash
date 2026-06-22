@@ -13,6 +13,7 @@ from openai import OpenAI
 import os
 import re
 import json
+import random
 
 
 # ============================================================
@@ -606,7 +607,12 @@ def observe_unknown_pairs(game, unknown_pairs):
     if not unknown_pairs:
         return
 
-    sample = unknown_pairs[:UNKNOWN_OBSERVE_LIMIT]
+    # If the list is large, do not always take the first N pairs.
+    # Random sampling lets repeated analyses gradually observe different unknown pairs.
+    if len(unknown_pairs) > UNKNOWN_OBSERVE_LIMIT:
+        sample = random.sample(unknown_pairs, UNKNOWN_OBSERVE_LIMIT)
+    else:
+        sample = unknown_pairs
 
     for a_raw, b_raw in sample:
         a, b = normalize_pair(a_raw, b_raw)
@@ -1377,7 +1383,15 @@ def api_stats():
         .all()
     )
 
-    unknown_count = UnknownObservation.query.filter_by(game=game, promoted=False).count()
+    unknown_pending_count = UnknownObservation.query.filter_by(game=game, promoted=False).count()
+    unknown_promoted_count = UnknownObservation.query.filter_by(game=game, promoted=True).count()
+    unknown_total_count = UnknownObservation.query.filter_by(game=game).count()
+
+    unknown_observation_total = (
+        db.session.query(db.func.coalesce(db.func.sum(UnknownObservation.observe_count), 0))
+        .filter(UnknownObservation.game == game)
+        .scalar()
+    )
 
     unknown_candidates = (
         UnknownObservation.query
@@ -1418,7 +1432,11 @@ def api_stats():
             }
             for s in safes
         ],
-        "unknown_observation_count": unknown_count,
+        "unknown_observation_count": unknown_pending_count,
+        "unknown_pending_count": unknown_pending_count,
+        "unknown_promoted_count": unknown_promoted_count,
+        "unknown_total_count": unknown_total_count,
+        "unknown_observation_total": int(unknown_observation_total or 0),
         "unknown_candidates": [
             {
                 "module_a": u.module_a,

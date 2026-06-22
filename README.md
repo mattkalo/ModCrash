@@ -71,3 +71,16 @@ observe_count >= AUTO_SAFE_THRESHOLD
 ```
 
 此機制代表「高頻共現候選安全」，不是絕對保證安全。
+
+
+## Unknown Observation Counter Fix
+
+待驗證組合數代表「尚未升級、尚未確認衝突的唯一模組配對數」，不是使用次數。
+
+本版本新增：
+- `unknown_pending_count`：仍待驗證的唯一配對數
+- `unknown_promoted_count`：已自動升級的配對數
+- `unknown_total_count`：所有曾觀察到的唯一配對數
+- `unknown_observation_total`：累積觀察次數總和
+
+大型模組列表不再永遠只記錄前 100 組未知配對，而是隨機抽樣 UNKNOWN_OBSERVE_LIMIT 組，讓重複分析可以逐步累積不同配對。
