@@ -50,6 +50,11 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 AUTO_SAFE_THRESHOLD = int(os.environ.get("AUTO_SAFE_THRESHOLD", "5"))
 UNKNOWN_OBSERVE_LIMIT = int(os.environ.get("UNKNOWN_OBSERVE_LIMIT", "100"))
 
+# API response caps: prevent /api/analyze from returning multi-MB JSON.
+MAX_CONFLICT_RESULTS = int(os.environ.get("MAX_CONFLICT_RESULTS", "80"))
+MAX_SAFE_RESULTS = int(os.environ.get("MAX_SAFE_RESULTS", "80"))
+MAX_UNKNOWN_RESULTS = int(os.environ.get("MAX_UNKNOWN_RESULTS", "30"))
+
 
 # ============================================================
 # Game Profiles
@@ -624,28 +629,11 @@ def observe_unknown_pairs(game, unknown_pairs):
             )
             db.session.add(obs)
 
-        if obs.observe_count >= AUTO_SAFE_THRESHOLD and not obs.promoted:
-            existing_safe = SafeCombination.query.filter_by(
-                game=game,
-                module_a=a,
-                module_b=b
-            ).first()
-            existing_conflict = ConflictRule.query.filter_by(
-                game=game,
-                module_a=a,
-                module_b=b
-            ).first()
-
-            if not existing_safe and not existing_conflict:
-                db.session.add(SafeCombination(
-                    game=game,
-                    module_a=a,
-                    module_b=b,
-                    report_count=obs.observe_count,
-                    confidence_score=calculate_confidence(obs.observe_count),
-                    source="auto_candidate"
-                ))
-                obs.promoted = True
+        # Reaching threshold means "候選 / 待驗證", not confirmed safe.
+        # Do NOT auto-promote into SafeCombination, because appearing in the same list
+        # does not prove the user successfully played without issues.
+        if obs.observe_count >= AUTO_SAFE_THRESHOLD:
+            obs.promoted = True
 
 
 # ============================================================
@@ -973,6 +961,20 @@ def switch_plan(plan_key):
 @app.route("/api/analyze", methods=["POST"])
 @login_required
 def api_analyze():
+    """
+    Compact database analysis.
+
+    Important:
+    Older versions returned every pair in JSON. If users upload 100+ mods, pair count becomes thousands:
+        80 mods  = 3,160 pairs
+        150 mods = 11,175 pairs
+    Returning every unknown pair can create multi-MB responses and make the browser feel stuck.
+
+    This version still checks every pair for summary counts, but only returns:
+    - limited conflict records
+    - limited safe records
+    - limited unknown sample records
+    """
     error = check_usage_or_error("analyze")
     if error:
         return jsonify({"error": error}), 403
@@ -1016,24 +1018,48 @@ def api_analyze():
     pairs = list(combinations(mods, 2))
     conflict_map, safe_map = batch_fetch_rules(game, pairs)
 
-    results = []
+    conflict_results = []
+    safe_results = []
+    unknown_results = []
     unknown_pairs = []
+
+    summary = {
+        "conflict": 0,
+        "safe": 0,
+        "unknown": 0,
+        "degree_count": {}
+    }
+
+    def add_degree_count(degree):
+        summary["degree_count"][degree] = summary["degree_count"].get(degree, 0) + 1
 
     for module_a, module_b in pairs:
         na, nb = normalize_pair(module_a, module_b)
         key = (na.lower(), nb.lower())
 
         if key in conflict_map:
-            results.append(result_from_conflict(module_a, module_b, conflict_map[key]))
+            item = result_from_conflict(module_a, module_b, conflict_map[key])
+            summary["conflict"] += 1
+            add_degree_count(item["conflict_degree"])
+
+            if len(conflict_results) < MAX_CONFLICT_RESULTS:
+                conflict_results.append(item)
+
         elif key in safe_map:
-            results.append(result_from_safe(module_a, module_b, safe_map[key]))
+            item = result_from_safe(module_a, module_b, safe_map[key])
+            summary["safe"] += 1
+            add_degree_count(item["conflict_degree"])
+
+            if len(safe_results) < MAX_SAFE_RESULTS:
+                safe_results.append(item)
+
         else:
-            results.append(result_from_unknown(module_a, module_b))
+            summary["unknown"] += 1
+            add_degree_count("未知衝突")
             unknown_pairs.append((module_a, module_b))
 
-    results = sort_results(results)
-    summary = summarize_results(results)
-    display_results = results[:limits["max_display_pairs"]]
+            if len(unknown_results) < MAX_UNKNOWN_RESULTS:
+                unknown_results.append(result_from_unknown(module_a, module_b))
 
     db.session.add(RawReport(
         game=game,
@@ -1046,6 +1072,9 @@ def api_analyze():
 
     record_usage("analyze")
 
+    # Result order: conflicts first, safe second, then a small unknown sample.
+    compact_results = sort_results(conflict_results + safe_results + unknown_results)
+
     return jsonify({
         "game": game,
         "game_label": GAME_PROFILES[game]["label"],
@@ -1053,10 +1082,16 @@ def api_analyze():
         "plan_name": limits["name"],
         "mods_detected": mods,
         "total_mods": len(mods),
-        "total_pairs_checked": len(results),
-        "displayed_pairs": len(display_results),
+        "total_pairs_checked": len(pairs),
+        "displayed_pairs": len(compact_results),
+        "response_limited": True,
+        "limits": {
+            "max_conflict_results": MAX_CONFLICT_RESULTS,
+            "max_safe_results": MAX_SAFE_RESULTS,
+            "max_unknown_results": MAX_UNKNOWN_RESULTS
+        },
         "summary": summary,
-        "results": display_results
+        "results": compact_results
     })
 
 
@@ -1260,6 +1295,14 @@ def api_stats():
 
     unknown_count = UnknownObservation.query.filter_by(game=game, promoted=False).count()
 
+    unknown_candidates = (
+        UnknownObservation.query
+        .filter_by(game=game)
+        .order_by(UnknownObservation.observe_count.desc())
+        .limit(60)
+        .all()
+    )
+
     conflict_items = []
     for c in conflicts:
         degree = normalize_conflict_degree(c.risk, c.conflict_type)
@@ -1292,6 +1335,15 @@ def api_stats():
             for s in safes
         ],
         "unknown_observation_count": unknown_count,
+        "unknown_candidates": [
+            {
+                "module_a": u.module_a,
+                "module_b": u.module_b,
+                "observe_count": u.observe_count,
+                "status": "candidate" if u.promoted else "unknown"
+            }
+            for u in unknown_candidates
+        ],
         "plans": PLAN_LIMITS,
         "games": GAME_PROFILES
     })

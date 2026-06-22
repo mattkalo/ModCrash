@@ -3,7 +3,6 @@
 
 {% block content %}
 
-<!-- Page Header -->
 <section class="mb-8">
     <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
         <div>
@@ -12,33 +11,24 @@
                 公開資料庫統計
             </h1>
             <p class="text-slate-400 max-w-3xl leading-relaxed">
-                左側顯示已知衝突組合，右側顯示已知安全組合。資料會依照不同遊戲分開管理，
-                避免 Skyrim、Stardew Valley、Minecraft 等遊戲的模組資料互相污染。
+                左側顯示已知衝突組合，右側顯示已知安全組合。待驗證組合只代表系統曾在玩家模組列表中觀察到，
+                但尚未確認安全或衝突，不會直接列入安全資料庫。
             </p>
         </div>
 
         <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 min-w-[260px]">
             <p class="text-slate-500 text-sm">目前查詢遊戲</p>
-            <p id="currentGameLabel" class="text-xl font-bold text-cyan-300 mt-1">
-                -
-            </p>
+            <p id="currentGameLabel" class="text-xl font-bold text-cyan-300 mt-1">-</p>
         </div>
     </div>
 </section>
 
-<!-- Control Panel -->
 <section class="bg-slate-900/85 border border-slate-800 rounded-2xl p-6 mb-6">
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
 
         <div class="lg:col-span-4">
-            <label class="block text-sm text-slate-300 mb-2">
-                選擇遊戲
-            </label>
-
-            <select 
-                id="gameSelect" 
-                class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-cyan-500"
-            >
+            <label class="block text-sm text-slate-300 mb-2">選擇遊戲</label>
+            <select id="gameSelect" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-cyan-500">
                 {% for key, game in games.items() %}
                 <option value="{{ key }}">{{ game.icon }} {{ game.label }}</option>
                 {% endfor %}
@@ -46,10 +36,7 @@
         </div>
 
         <div class="lg:col-span-4">
-            <label class="block text-sm text-slate-300 mb-2">
-                搜尋模組名稱
-            </label>
-
+            <label class="block text-sm text-slate-300 mb-2">搜尋模組名稱</label>
             <input
                 id="searchInput"
                 type="text"
@@ -60,25 +47,16 @@
         </div>
 
         <div class="lg:col-span-4 flex flex-wrap gap-3">
-            <button 
-                onclick="loadStats()" 
-                class="bg-cyan-600 hover:bg-cyan-500 px-5 py-3 rounded-xl font-bold text-white transition"
-            >
+            <button onclick="loadStats()" class="bg-cyan-600 hover:bg-cyan-500 px-5 py-3 rounded-xl font-bold text-white transition">
                 查詢資料庫
             </button>
 
-            <button 
-                onclick="resetSearch()" 
-                class="bg-slate-800 hover:bg-slate-700 px-5 py-3 rounded-xl font-bold text-slate-200 transition"
-            >
+            <button onclick="resetSearch()" class="bg-slate-800 hover:bg-slate-700 px-5 py-3 rounded-xl font-bold text-slate-200 transition">
                 清除搜尋
             </button>
 
             {% if current_user.is_authenticated %}
-            <button 
-                onclick="seedDemoData()" 
-                class="bg-indigo-700 hover:bg-indigo-600 px-5 py-3 rounded-xl font-bold text-white transition"
-            >
+            <button onclick="seedDemoData()" class="bg-indigo-700 hover:bg-indigo-600 px-5 py-3 rounded-xl font-bold text-white transition">
                 建立示範資料
             </button>
             {% endif %}
@@ -87,7 +65,6 @@
     </div>
 </section>
 
-<!-- Summary Cards -->
 <section class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
 
     <div class="bg-red-950/30 border border-red-900 rounded-2xl p-5">
@@ -99,13 +76,13 @@
     <div class="bg-emerald-950/30 border border-emerald-900 rounded-2xl p-5">
         <p class="text-sm text-emerald-300">安全組合數</p>
         <p id="safeTotal" class="text-4xl font-bold text-emerald-400 mt-2">0</p>
-        <p class="text-xs text-slate-500 mt-2">玩家回報可正常共存</p>
+        <p class="text-xs text-slate-500 mt-2">玩家明確回報可正常共存</p>
     </div>
 
     <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-5">
-        <p class="text-sm text-slate-300">未知觀察數</p>
+        <p class="text-sm text-slate-300">待驗證組合</p>
         <p id="unknownTotal" class="text-4xl font-bold text-slate-200 mt-2">0</p>
-        <p class="text-xs text-slate-500 mt-2">等待更多資料累積</p>
+        <p class="text-xs text-slate-500 mt-2">已被觀察，但尚未確認安全或衝突</p>
     </div>
 
     <div class="bg-cyan-950/30 border border-cyan-900 rounded-2xl p-5">
@@ -116,25 +93,33 @@
 
 </section>
 
-<!-- Main Two Columns -->
+<section id="candidatePanel" class="bg-slate-900/85 border border-slate-800 rounded-2xl p-6 mb-6 hidden">
+    <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4">
+        <div>
+            <h2 class="text-2xl font-bold text-slate-200">待驗證組合</h2>
+            <p class="text-sm text-slate-400 mt-1">
+                這些組合曾在玩家列表中出現，但尚未收到「正常」或「衝突」回報。它們不等於安全組合。
+            </p>
+        </div>
+        <span id="candidateBadge" class="px-3 py-1 rounded-full text-xs bg-slate-800 border border-slate-700 text-slate-300 whitespace-nowrap">
+            0 筆
+        </span>
+    </div>
+    <div id="candidateList" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+</section>
+
 <section class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 
-    <!-- Left: Conflict DB -->
     <div class="bg-slate-900/90 border border-red-950/80 rounded-2xl overflow-hidden">
         <div class="bg-red-950/30 border-b border-red-900/70 p-5">
             <div class="flex items-center justify-between gap-4">
                 <div>
-                    <h2 class="text-2xl font-bold text-red-300">
-                        衝突資料庫
-                    </h2>
+                    <h2 class="text-2xl font-bold text-red-300">衝突資料庫</h2>
                     <p class="text-sm text-slate-400 mt-1">
                         已知可能造成崩潰、角色異常、地圖破圖或腳本問題的模組組合。
                     </p>
                 </div>
-
-                <span id="conflictBadge" class="px-3 py-1 rounded-full text-xs bg-red-950 border border-red-700 text-red-300 whitespace-nowrap">
-                    0 筆
-                </span>
+                <span id="conflictBadge" class="px-3 py-1 rounded-full text-xs bg-red-950 border border-red-700 text-red-300 whitespace-nowrap">0 筆</span>
             </div>
         </div>
 
@@ -147,22 +132,16 @@
         </div>
     </div>
 
-    <!-- Right: Safe DB -->
     <div class="bg-slate-900/90 border border-emerald-950/80 rounded-2xl overflow-hidden">
         <div class="bg-emerald-950/30 border-b border-emerald-900/70 p-5">
             <div class="flex items-center justify-between gap-4">
                 <div>
-                    <h2 class="text-2xl font-bold text-emerald-300">
-                        安全組合資料庫
-                    </h2>
+                    <h2 class="text-2xl font-bold text-emerald-300">安全組合資料庫</h2>
                     <p class="text-sm text-slate-400 mt-1">
-                        玩家回報可正常共存，或系統多次觀察後自動累積的候選安全組合。
+                        只收錄玩家明確回報正常，或示範資料建立的可共存組合。
                     </p>
                 </div>
-
-                <span id="safeBadge" class="px-3 py-1 rounded-full text-xs bg-emerald-950 border border-emerald-700 text-emerald-300 whitespace-nowrap">
-                    0 筆
-                </span>
+                <span id="safeBadge" class="px-3 py-1 rounded-full text-xs bg-emerald-950 border border-emerald-700 text-emerald-300 whitespace-nowrap">0 筆</span>
             </div>
         </div>
 
@@ -181,6 +160,7 @@
 let latestStats = {
     conflict_rules: [],
     safe_combinations: [],
+    unknown_candidates: [],
     unknown_observation_count: 0,
     game_label: ""
 };
@@ -195,57 +175,12 @@ function escapeHtml(text) {
 }
 
 function conflictDegreeStyle(degree) {
-    if (degree === "啟動阻斷") {
-        return {
-            border: "border-red-800",
-            badge: "bg-red-950 text-red-300 border-red-700",
-            title: "text-red-300",
-            dot: "bg-red-400"
-        };
-    }
-
-    if (degree === "高度崩潰風險") {
-        return {
-            border: "border-orange-800",
-            badge: "bg-orange-950 text-orange-300 border-orange-700",
-            title: "text-orange-300",
-            dot: "bg-orange-400"
-        };
-    }
-
-    if (degree === "中度功能異常") {
-        return {
-            border: "border-yellow-800",
-            badge: "bg-yellow-950 text-yellow-300 border-yellow-700",
-            title: "text-yellow-300",
-            dot: "bg-yellow-400"
-        };
-    }
-
-    if (degree === "視覺 / 地圖異常") {
-        return {
-            border: "border-blue-800",
-            badge: "bg-blue-950 text-blue-300 border-blue-700",
-            title: "text-blue-300",
-            dot: "bg-blue-400"
-        };
-    }
-
-    if (degree === "輕微覆蓋") {
-        return {
-            border: "border-slate-700",
-            badge: "bg-slate-800 text-slate-300 border-slate-600",
-            title: "text-slate-300",
-            dot: "bg-slate-400"
-        };
-    }
-
-    return {
-        border: "border-red-900",
-        badge: "bg-red-950 text-red-300 border-red-800",
-        title: "text-red-300",
-        dot: "bg-red-400"
-    };
+    if (degree === "啟動阻斷") return {border:"border-red-800", badge:"bg-red-950 text-red-300 border-red-700", title:"text-red-300", dot:"bg-red-400"};
+    if (degree === "高度崩潰風險") return {border:"border-orange-800", badge:"bg-orange-950 text-orange-300 border-orange-700", title:"text-orange-300", dot:"bg-orange-400"};
+    if (degree === "中度功能異常") return {border:"border-yellow-800", badge:"bg-yellow-950 text-yellow-300 border-yellow-700", title:"text-yellow-300", dot:"bg-yellow-400"};
+    if (degree === "視覺 / 地圖異常") return {border:"border-blue-800", badge:"bg-blue-950 text-blue-300 border-blue-700", title:"text-blue-300", dot:"bg-blue-400"};
+    if (degree === "輕微覆蓋") return {border:"border-slate-700", badge:"bg-slate-800 text-slate-300 border-slate-600", title:"text-slate-300", dot:"bg-slate-400"};
+    return {border:"border-red-900", badge:"bg-red-950 text-red-300 border-red-800", title:"text-red-300", dot:"bg-red-400"};
 }
 
 function sourceLabel(source) {
@@ -274,7 +209,8 @@ function matchKeyword(item, keyword) {
         item.conflict_degree,
         item.impact_area,
         item.effect,
-        item.source
+        item.source,
+        item.status
     ].join(" ").toLowerCase();
 
     return text.includes(keyword.toLowerCase());
@@ -290,10 +226,7 @@ function applyFilter() {
 }
 
 async function seedDemoData() {
-    const response = await fetch("/api/seed_demo", {
-        method: "POST"
-    });
-
+    const response = await fetch("/api/seed_demo", { method: "POST" });
     const data = await response.json();
 
     if (data.error) {
@@ -313,25 +246,14 @@ async function loadStats() {
     document.getElementById("dbStatus").innerText = "載入中";
     document.getElementById("currentGameLabel").innerText = "載入中...";
 
-    conflictList.innerHTML = `
-        <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 text-slate-400">
-            衝突資料載入中...
-        </div>
-    `;
-
-    safeList.innerHTML = `
-        <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 text-slate-400">
-            安全組合載入中...
-        </div>
-    `;
+    conflictList.innerHTML = `<div class="bg-slate-950 border border-slate-800 rounded-xl p-5 text-slate-400">衝突資料載入中...</div>`;
+    safeList.innerHTML = `<div class="bg-slate-950 border border-slate-800 rounded-xl p-5 text-slate-400">安全組合載入中...</div>`;
 
     try {
         const res = await fetch(`/api/stats?game=${encodeURIComponent(game)}`);
         const data = await res.json();
 
-        if (data.error) {
-            throw new Error(data.error);
-        }
+        if (data.error) throw new Error(data.error);
 
         latestStats = data;
 
@@ -348,17 +270,8 @@ async function loadStats() {
     } catch (error) {
         document.getElementById("dbStatus").innerText = "錯誤";
 
-        conflictList.innerHTML = `
-            <div class="bg-red-950/40 border border-red-800 rounded-xl p-5 text-red-300">
-                載入失敗：${escapeHtml(error.message)}
-            </div>
-        `;
-
-        safeList.innerHTML = `
-            <div class="bg-red-950/40 border border-red-800 rounded-xl p-5 text-red-300">
-                載入失敗：${escapeHtml(error.message)}
-            </div>
-        `;
+        conflictList.innerHTML = `<div class="bg-red-950/40 border border-red-800 rounded-xl p-5 text-red-300">載入失敗：${escapeHtml(error.message)}</div>`;
+        safeList.innerHTML = `<div class="bg-red-950/40 border border-red-800 rounded-xl p-5 text-red-300">載入失敗：${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -367,23 +280,65 @@ function renderLists() {
 
     const conflictRules = (latestStats.conflict_rules || []).filter(item => matchKeyword(item, keyword));
     const safeCombinations = (latestStats.safe_combinations || []).filter(item => matchKeyword(item, keyword));
+    const candidates = (latestStats.unknown_candidates || []).filter(item => matchKeyword(item, keyword));
 
     document.getElementById("conflictBadge").innerText = `${conflictRules.length} 筆`;
     document.getElementById("safeBadge").innerText = `${safeCombinations.length} 筆`;
 
+    renderCandidateList(candidates);
     renderConflictList(conflictRules);
     renderSafeList(safeCombinations);
+}
+
+function renderCandidateList(items) {
+    const panel = document.getElementById("candidatePanel");
+    const list = document.getElementById("candidateList");
+    const badge = document.getElementById("candidateBadge");
+
+    if (!items.length) {
+        panel.classList.add("hidden");
+        list.innerHTML = "";
+        badge.innerText = "0 筆";
+        return;
+    }
+
+    panel.classList.remove("hidden");
+    badge.innerText = `${items.length} 筆`;
+
+    list.innerHTML = items.map(item => {
+        const statusText = item.status === "candidate" ? "候選待驗證" : "觀察中";
+        const statusClass = item.status === "candidate"
+            ? "bg-cyan-950 border-cyan-800 text-cyan-300"
+            : "bg-slate-800 border-slate-700 text-slate-300";
+
+        return `
+            <article class="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                <h3 class="font-bold text-slate-200 leading-snug">
+                    ${escapeHtml(item.module_a)}
+                    <span class="text-slate-500">+</span>
+                    ${escapeHtml(item.module_b)}
+                </h3>
+                <div class="mt-3 flex flex-wrap gap-2 text-xs">
+                    <span class="px-3 py-1 rounded-full border ${statusClass}">
+                        ${statusText}
+                    </span>
+                    <span class="px-3 py-1 rounded-full border bg-slate-800 border-slate-700 text-slate-300">
+                        觀察 ${escapeHtml(item.observe_count)} 次
+                    </span>
+                </div>
+                <p class="text-xs text-slate-500 mt-3">
+                    這不是安全結論；需玩家明確回報正常才會進入安全組合資料庫。
+                </p>
+            </article>
+        `;
+    }).join("");
 }
 
 function renderConflictList(items) {
     const conflictList = document.getElementById("conflictList");
 
     if (!items.length) {
-        conflictList.innerHTML = `
-            <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 text-slate-400">
-                目前沒有符合條件的衝突資料。
-            </div>
-        `;
+        conflictList.innerHTML = `<div class="bg-slate-950 border border-slate-800 rounded-xl p-5 text-slate-400">目前沒有符合條件的衝突資料。</div>`;
         return;
     }
 
@@ -404,7 +359,6 @@ function renderConflictList(items) {
                                     <span class="text-slate-500">+</span>
                                     ${escapeHtml(item.module_b)}
                                 </h3>
-
                                 <p class="text-xs text-slate-500 mt-1">
                                     衝突組合識別碼：${escapeHtml(item.module_a)} / ${escapeHtml(item.module_b)}
                                 </p>
@@ -461,11 +415,7 @@ function renderSafeList(items) {
     const safeList = document.getElementById("safeList");
 
     if (!items.length) {
-        safeList.innerHTML = `
-            <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 text-slate-400">
-                目前沒有符合條件的安全組合資料。
-            </div>
-        `;
+        safeList.innerHTML = `<div class="bg-slate-950 border border-slate-800 rounded-xl p-5 text-slate-400">目前沒有符合條件的安全組合資料。</div>`;
         return;
     }
 
@@ -485,7 +435,6 @@ function renderSafeList(items) {
                                     <span class="text-slate-500">+</span>
                                     ${escapeHtml(item.module_b)}
                                 </h3>
-
                                 <p class="text-xs text-slate-500 mt-1">
                                     安全組合識別碼：${escapeHtml(item.module_a)} / ${escapeHtml(item.module_b)}
                                 </p>

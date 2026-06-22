@@ -178,16 +178,36 @@ function renderResults(data) {
     const resultsDiv = document.getElementById("results");
     const summary = document.getElementById("summary");
     const results = data.results || [];
-    let conflictCount = 0, safeCount = 0, unknownCount = 0;
+
+    const fullSummary = data.summary || {};
+    const conflictCount = fullSummary.conflict ?? 0;
+    const safeCount = fullSummary.safe ?? 0;
+    const unknownCount = fullSummary.unknown ?? 0;
+
     resultsDiv.innerHTML = "";
+
+    if (data.response_limited) {
+        resultsDiv.innerHTML += `
+            <div class="bg-cyan-950/40 border border-cyan-800 rounded-xl p-5 text-cyan-200 mb-4">
+                已完成 ${escapeHtml(data.total_pairs_checked)} 組配對分析。為避免瀏覽器卡住，頁面只顯示代表性結果：
+                衝突最多 ${escapeHtml(data.limits?.max_conflict_results ?? "-")} 筆、
+                安全最多 ${escapeHtml(data.limits?.max_safe_results ?? "-")} 筆、
+                未知樣本最多 ${escapeHtml(data.limits?.max_unknown_results ?? "-")} 筆。
+            </div>
+        `;
+    }
+
     if (!results.length) {
-        resultsDiv.innerHTML = `<div class="bg-slate-900 border border-slate-800 rounded-xl p-5 text-slate-400">沒有可顯示的組合。請至少輸入兩個模組。</div>`;
+        resultsDiv.innerHTML += `<div class="bg-slate-900 border border-slate-800 rounded-xl p-5 text-slate-400">沒有可顯示的組合。請至少輸入兩個模組。</div>`;
+        document.getElementById("conflictCount").innerText = conflictCount;
+        document.getElementById("safeCount").innerText = safeCount;
+        document.getElementById("unknownCount").innerText = unknownCount;
+        document.getElementById("pairCount").innerText = data.total_pairs_checked || 0;
+        summary.classList.remove("hidden");
         return;
     }
+
     results.forEach(item => {
-        if (item.status === "conflict") conflictCount++;
-        else if (item.status === "safe") safeCount++;
-        else unknownCount++;
         const style = degreeStyle(item.conflict_degree);
         const label = item.status === "conflict" ? "已知衝突" : item.status === "safe" ? "已知安全" : "未知組合";
         resultsDiv.innerHTML += `<div class="bg-slate-900 border ${style.border} rounded-xl p-5">
