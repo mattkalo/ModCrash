@@ -145,17 +145,29 @@ async function aiAnalyzeFile() {
     }
     latestReport = data;
     renderDetectedMods(data);
-    renderAiResult(data.ai_result);
+    renderAiResult(data.ai_result, data.database_saved);
 }
-function renderAiResult(result) {
+function renderAiResult(result, databaseSaved = null) {
     const aiResult = document.getElementById("aiResult");
-    const conflicts = result.likely_conflicts || [];
+    const conflicts = result.likely_conflicts || result.conflicts || result.predicted_conflicts || [];
+    const savedCount = databaseSaved?.conflict_rules_saved ?? 0;
+    const rawSaved = databaseSaved?.raw_report_saved ? "已保存" : "未確認";
     aiResult.innerHTML = `
         <div class="flex flex-col md:flex-row md:justify-between md:items-start gap-4 mb-5">
             <div><h2 class="text-2xl font-bold text-purple-300 mb-2">OpenAI 深度分析結果</h2>
             <p class="text-slate-400">${escapeHtml(result.summary || "")}</p></div>
             <span class="px-3 py-1 rounded-full border bg-purple-950 text-purple-300 border-purple-800 text-sm whitespace-nowrap">${escapeHtml(result.overall_conflict_degree || "未知衝突")}</span>
         </div>
+
+        <div class="bg-slate-950 border border-purple-800/70 rounded-xl p-4 mb-5">
+            <h3 class="font-bold text-purple-300 mb-2">資料庫回寫狀態</h3>
+            <p class="text-sm text-slate-300">AI 原始報告：${escapeHtml(rawSaved)}</p>
+            <p class="text-sm text-slate-300 mt-1">寫入衝突資料庫：${escapeHtml(savedCount)} 筆</p>
+            <p class="text-xs text-slate-500 mt-2">
+                注意：只有 OpenAI 回傳的 likely_conflicts 會寫入「衝突資料庫」。如果 AI 沒判斷出明確衝突，資料只會存成原始 AI 報告，不會出現在公開資料庫的衝突列表。
+            </p>
+        </div>
+
         <div class="space-y-4">
         ${conflicts.length ? conflicts.map(item => {
             const style = degreeStyle(item.conflict_degree);

@@ -629,10 +629,31 @@ def observe_unknown_pairs(game, unknown_pairs):
             )
             db.session.add(obs)
 
-        # Reaching threshold means "候選 / 待驗證", not confirmed safe.
-        # Do NOT auto-promote into SafeCombination, because appearing in the same list
-        # does not prove the user successfully played without issues.
-        if obs.observe_count >= AUTO_SAFE_THRESHOLD:
+        # Auto-promote repeated unknown observations into SafeCombination.
+        # Meaning: if the same pair appears many times and has not been reported as conflict,
+        # the system marks it as an auto-candidate safe pair.
+        if obs.observe_count >= AUTO_SAFE_THRESHOLD and not obs.promoted:
+            existing_safe = SafeCombination.query.filter_by(
+                game=game,
+                module_a=a,
+                module_b=b
+            ).first()
+            existing_conflict = ConflictRule.query.filter_by(
+                game=game,
+                module_a=a,
+                module_b=b
+            ).first()
+
+            if not existing_safe and not existing_conflict:
+                db.session.add(SafeCombination(
+                    game=game,
+                    module_a=a,
+                    module_b=b,
+                    report_count=obs.observe_count,
+                    confidence_score=calculate_confidence(obs.observe_count),
+                    source="auto_candidate"
+                ))
+
             obs.promoted = True
 
 
@@ -693,14 +714,50 @@ def clean_json_text(text_value):
     return text_value
 
 
+def extract_ai_conflict_items(ai_data):
+    """
+    Accept several possible OpenAI JSON shapes.
+    Main expected key: likely_conflicts.
+    Fallback keys are included because model output may vary.
+    """
+    if not isinstance(ai_data, dict):
+        return []
+
+    for key in ["likely_conflicts", "conflicts", "predicted_conflicts", "detected_conflicts"]:
+        value = ai_data.get(key)
+        if isinstance(value, list):
+            return value
+
+    return []
+
+
 def save_ai_conflict_result(game, ai_data):
-    conflicts = ai_data.get("likely_conflicts", [])
+    """
+    Save OpenAI-predicted conflict pairs into ConflictRule.
+    This function intentionally saves only conflict items.
+    If OpenAI returns no likely_conflicts, only RawReport will be saved by /api/ai_analyze.
+    """
+    conflicts = extract_ai_conflict_items(ai_data)
+    saved_count = 0
+    skipped_count = 0
+    saved_pairs = []
 
     for item in conflicts:
-        module_a = item.get("module_a", "").strip()
-        module_b = item.get("module_b", "").strip()
+        if not isinstance(item, dict):
+            skipped_count += 1
+            continue
+
+        module_a = str(item.get("module_a", "") or "").strip()
+        module_b = str(item.get("module_b", "") or "").strip()
+
+        # Fallback: allow {"modules": ["A", "B"]}.
+        modules = item.get("modules")
+        if (not module_a or not module_b) and isinstance(modules, list) and len(modules) >= 2:
+            module_a = str(modules[0]).strip()
+            module_b = str(modules[1]).strip()
 
         if not module_a or not module_b:
+            skipped_count += 1
             continue
 
         a, b = normalize_pair(module_a, module_b)
@@ -709,9 +766,15 @@ def save_ai_conflict_result(game, ai_data):
         conflict_degree = (
             item.get("conflict_degree")
             or item.get("risk")
+            or item.get("severity")
             or default_degree_by_type(conflict_type)
         )
-        conflict_degree = normalize_conflict_degree(conflict_degree, conflict_type)
+        conflict_degree = normalize_conflict_degree(str(conflict_degree), conflict_type)
+
+        try:
+            confidence = float(item.get("confidence_score", 0.55))
+        except Exception:
+            confidence = 0.55
 
         rule = ConflictRule.query.filter_by(
             game=game,
@@ -721,7 +784,7 @@ def save_ai_conflict_result(game, ai_data):
 
         if rule:
             rule.report_count += 1
-            rule.confidence_score = calculate_confidence(rule.report_count)
+            rule.confidence_score = max(rule.confidence_score or 0, calculate_confidence(rule.report_count), confidence)
             rule.conflict_type = conflict_type
             rule.risk = conflict_degree
             rule.source = "openai"
@@ -733,12 +796,26 @@ def save_ai_conflict_result(game, ai_data):
                 conflict_type=conflict_type,
                 risk=conflict_degree,
                 report_count=1,
-                confidence_score=float(item.get("confidence_score", 0.55)),
+                confidence_score=confidence,
                 source="openai"
             )
             db.session.add(rule)
 
+        saved_count += 1
+        saved_pairs.append({
+            "module_a": a,
+            "module_b": b,
+            "conflict_type": conflict_type,
+            "conflict_degree": conflict_degree
+        })
+
     db.session.commit()
+
+    return {
+        "saved_count": saved_count,
+        "skipped_count": skipped_count,
+        "saved_pairs": saved_pairs
+    }
 
 
 def call_openai_analysis(game, mods, crash_log=""):
@@ -1148,7 +1225,7 @@ def api_ai_analyze():
     ai_result = call_openai_analysis(game, mods, crash_log)
 
     # New DB session after OpenAI call.
-    save_ai_conflict_result(game, ai_result)
+    db_save_result = save_ai_conflict_result(game, ai_result)
 
     db.session.add(RawReport(
         game=game,
@@ -1165,7 +1242,14 @@ def api_ai_analyze():
         "game_label": GAME_PROFILES[game]["label"],
         "plan": plan_key,
         "mods_detected": mods,
-        "ai_result": ai_result
+        "ai_result": ai_result,
+        "database_saved": {
+            "raw_report_saved": True,
+            "conflict_rules_saved": db_save_result["saved_count"],
+            "conflict_rules_skipped": db_save_result["skipped_count"],
+            "saved_pairs": db_save_result["saved_pairs"],
+            "note": "OpenAI 只會把 likely_conflicts 內的衝突組合寫入衝突資料庫；若 AI 判斷沒有明確衝突，則只保存原始 AI 報告。"
+        }
     })
 
 

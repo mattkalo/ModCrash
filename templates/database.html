@@ -11,8 +11,8 @@
                 公開資料庫統計
             </h1>
             <p class="text-slate-400 max-w-3xl leading-relaxed">
-                左側顯示已知衝突組合，右側顯示已知安全組合。待驗證組合只代表系統曾在玩家模組列表中觀察到，
-                但尚未確認安全或衝突，不會直接列入安全資料庫。
+                左側顯示已知衝突組合，右側顯示已知安全組合。待驗證組合代表系統曾在玩家模組列表中觀察到。若同一組合累積到門檻且沒有衝突回報，
+                系統會以 auto_candidate 來源自動升級到安全組合資料庫。
             </p>
         </div>
 
@@ -76,13 +76,13 @@
     <div class="bg-emerald-950/30 border border-emerald-900 rounded-2xl p-5">
         <p class="text-sm text-emerald-300">安全組合數</p>
         <p id="safeTotal" class="text-4xl font-bold text-emerald-400 mt-2">0</p>
-        <p class="text-xs text-slate-500 mt-2">玩家明確回報可正常共存</p>
+        <p class="text-xs text-slate-500 mt-2">玩家回報或系統自動候選</p>
     </div>
 
     <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-5">
         <p class="text-sm text-slate-300">待驗證組合</p>
         <p id="unknownTotal" class="text-4xl font-bold text-slate-200 mt-2">0</p>
-        <p class="text-xs text-slate-500 mt-2">已被觀察，但尚未確認安全或衝突</p>
+        <p class="text-xs text-slate-500 mt-2">未達門檻者仍等待資料累積</p>
     </div>
 
     <div class="bg-cyan-950/30 border border-cyan-900 rounded-2xl p-5">
@@ -98,7 +98,7 @@
         <div>
             <h2 class="text-2xl font-bold text-slate-200">待驗證組合</h2>
             <p class="text-sm text-slate-400 mt-1">
-                這些組合曾在玩家列表中出現，但尚未收到「正常」或「衝突」回報。它們不等於安全組合。
+                這些組合曾在玩家列表中出現。達到門檻後會以 auto_candidate 來源自動進入安全組合資料庫。
             </p>
         </div>
         <span id="candidateBadge" class="px-3 py-1 rounded-full text-xs bg-slate-800 border border-slate-700 text-slate-300 whitespace-nowrap">
@@ -138,7 +138,7 @@
                 <div>
                     <h2 class="text-2xl font-bold text-emerald-300">安全組合資料庫</h2>
                     <p class="text-sm text-slate-400 mt-1">
-                        只收錄玩家明確回報正常，或示範資料建立的可共存組合。
+                        收錄玩家明確回報正常、示範資料，以及系統自動升級的 auto_candidate 組合。
                     </p>
                 </div>
                 <span id="safeBadge" class="px-3 py-1 rounded-full text-xs bg-emerald-950 border border-emerald-700 text-emerald-300 whitespace-nowrap">0 筆</span>
@@ -327,7 +327,7 @@ function renderCandidateList(items) {
                     </span>
                 </div>
                 <p class="text-xs text-slate-500 mt-3">
-                    這不是安全結論；需玩家明確回報正常才會進入安全組合資料庫。
+                    未達門檻時仍是待驗證；達到門檻且無衝突紀錄時會自動進入安全組合資料庫。
                 </p>
             </article>
         `;
