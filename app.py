@@ -636,9 +636,10 @@ def observe_unknown_pairs(game, unknown_pairs):
             db.session.add(obs)
 
         # Auto-promote repeated unknown observations into SafeCombination.
-        # Meaning: if the same pair appears many times and has not been reported as conflict,
-        # the system marks it as an auto-candidate safe pair.
-        if obs.observe_count >= AUTO_SAFE_THRESHOLD and not obs.promoted:
+        # Important:
+        # Some older versions set obs.promoted=True without creating SafeCombination.
+        # Therefore, once the threshold is reached, always verify whether the safe row exists.
+        if obs.observe_count >= AUTO_SAFE_THRESHOLD:
             existing_safe = SafeCombination.query.filter_by(
                 game=game,
                 module_a=a,
@@ -1361,11 +1362,93 @@ def api_report_conflict():
     })
 
 
+@app.route("/api/backfill_auto_safe", methods=["POST"])
+@login_required
+def api_backfill_auto_safe():
+    """
+    Backfill old UnknownObservation rows into SafeCombination.
+
+    This fixes older deployments where UnknownObservation.promoted=True was set,
+    but the corresponding SafeCombination row was not created.
+    """
+    data = request.json or {}
+    game = (data.get("game") or request.form.get("game") or "skyrim").lower().strip()
+    if game not in GAME_PROFILES:
+        game = "generic"
+
+    candidates = (
+        UnknownObservation.query
+        .filter(
+            UnknownObservation.game == game,
+            UnknownObservation.observe_count >= AUTO_SAFE_THRESHOLD
+        )
+        .all()
+    )
+
+    created_count = 0
+    skipped_conflict_count = 0
+    skipped_existing_count = 0
+    checked_count = 0
+
+    for obs in candidates:
+        checked_count += 1
+
+        existing_conflict = ConflictRule.query.filter_by(
+            game=game,
+            module_a=obs.module_a,
+            module_b=obs.module_b
+        ).first()
+
+        if existing_conflict:
+            skipped_conflict_count += 1
+            obs.promoted = True
+            continue
+
+        existing_safe = SafeCombination.query.filter_by(
+            game=game,
+            module_a=obs.module_a,
+            module_b=obs.module_b
+        ).first()
+
+        if existing_safe:
+            skipped_existing_count += 1
+            existing_safe.report_count = max(existing_safe.report_count or 1, obs.observe_count)
+            existing_safe.confidence_score = max(existing_safe.confidence_score or 0, calculate_confidence(obs.observe_count))
+            obs.promoted = True
+            continue
+
+        db.session.add(SafeCombination(
+            game=game,
+            module_a=obs.module_a,
+            module_b=obs.module_b,
+            report_count=obs.observe_count,
+            confidence_score=calculate_confidence(obs.observe_count),
+            source="auto_candidate"
+        ))
+        obs.promoted = True
+        created_count += 1
+
+    db.session.commit()
+
+    return jsonify({
+        "status": "success",
+        "game": game,
+        "message": f"已補回 {created_count} 組 auto_candidate 安全組合。",
+        "checked_count": checked_count,
+        "created_count": created_count,
+        "skipped_existing_count": skipped_existing_count,
+        "skipped_conflict_count": skipped_conflict_count
+    })
+
+
 @app.route("/api/stats")
 def api_stats():
     game = request.args.get("game", "skyrim").lower().strip()
     if game not in GAME_PROFILES:
         game = "generic"
+
+    conflict_total_count = ConflictRule.query.filter_by(game=game).count()
+    safe_total_count = SafeCombination.query.filter_by(game=game).count()
 
     conflicts = (
         ConflictRule.query
@@ -1420,6 +1503,8 @@ def api_stats():
     return jsonify({
         "game": game,
         "game_label": GAME_PROFILES[game]["label"],
+        "conflict_total_count": conflict_total_count,
+        "safe_total_count": safe_total_count,
         "conflict_rules": conflict_items,
         "safe_combinations": [
             {

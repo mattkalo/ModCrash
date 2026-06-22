@@ -59,6 +59,10 @@
             <button onclick="seedDemoData()" class="bg-indigo-700 hover:bg-indigo-600 px-5 py-3 rounded-xl font-bold text-white transition">
                 建立示範資料
             </button>
+
+            <button onclick="backfillAutoSafe()" class="bg-emerald-700 hover:bg-emerald-600 px-5 py-3 rounded-xl font-bold text-white transition">
+                補回自動安全
+            </button>
             {% endif %}
         </div>
 
@@ -76,7 +80,7 @@
     <div class="bg-emerald-950/30 border border-emerald-900 rounded-2xl p-5">
         <p class="text-sm text-emerald-300">安全組合數</p>
         <p id="safeTotal" class="text-4xl font-bold text-emerald-400 mt-2">0</p>
-        <p class="text-xs text-slate-500 mt-2">玩家回報或系統自動候選</p>
+        <p class="text-xs text-slate-500 mt-2">資料庫總數，列表最多顯示前 80 筆</p>
     </div>
 
     <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-5">
@@ -240,6 +244,34 @@ async function seedDemoData() {
     await loadStats();
 }
 
+async function backfillAutoSafe() {
+    const game = document.getElementById("gameSelect").value;
+
+    const response = await fetch("/api/backfill_auto_safe", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({game})
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+        alert(data.error);
+        return;
+    }
+
+    alert(
+        `${data.message}\n` +
+        `檢查：${data.checked_count} 組\n` +
+        `新增：${data.created_count} 組\n` +
+        `已存在：${data.skipped_existing_count} 組\n` +
+        `因衝突略過：${data.skipped_conflict_count} 組`
+    );
+
+    await loadStats();
+}
+
+
 async function loadStats() {
     const game = document.getElementById("gameSelect").value;
     const conflictList = document.getElementById("conflictList");
@@ -260,8 +292,8 @@ async function loadStats() {
         latestStats = data;
 
         document.getElementById("currentGameLabel").innerText = data.game_label || game;
-        document.getElementById("conflictTotal").innerText = (data.conflict_rules || []).length;
-        document.getElementById("safeTotal").innerText = (data.safe_combinations || []).length;
+        document.getElementById("conflictTotal").innerText = data.conflict_total_count ?? (data.conflict_rules || []).length;
+        document.getElementById("safeTotal").innerText = data.safe_total_count ?? (data.safe_combinations || []).length;
         document.getElementById("unknownTotal").innerText = data.unknown_pending_count ?? data.unknown_observation_count ?? 0;
         document.getElementById("observationTotal").innerText =
             `累積觀察 ${data.unknown_observation_total || 0} 次 / 已升級 ${data.unknown_promoted_count || 0} 組`;

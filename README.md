@@ -94,3 +94,22 @@ observe_count >= AUTO_SAFE_THRESHOLD
 - `likely_safe_combinations` → 寫入 `SafeCombination`，source=`openai_safe`
 - 若同一配對已存在於 `ConflictRule`，不會被寫入安全組合，避免衝突資料被覆蓋成安全。
 - AI 原始回覆仍會保存到 `RawReport`。
+
+
+## Safe Backfill Fix
+
+若舊版本曾把 `UnknownObservation.promoted=True`，但沒有建立對應的 `SafeCombination`，會造成畫面出現：
+
+```text
+待驗證組合數：100
+已升級：770
+安全組合數：7
+```
+
+本版本新增：
+
+- `/api/backfill_auto_safe`
+- 資料庫頁面按鈕「補回自動安全」
+- `/api/stats` 回傳 `safe_total_count` 與 `conflict_total_count`
+
+按下「補回自動安全」後，符合門檻且沒有衝突紀錄的舊資料會補寫到 `SafeCombination`，source=`auto_candidate`。
