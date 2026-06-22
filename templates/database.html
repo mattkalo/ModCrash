@@ -11,8 +11,8 @@
                 公開資料庫統計
             </h1>
             <p class="text-slate-400 max-w-3xl leading-relaxed">
-                左側顯示已知衝突組合，右側顯示已知安全組合。待驗證組合代表系統曾在玩家模組列表中觀察到。若同一組合累積到門檻且沒有衝突回報，
-                系統會以 auto_candidate 來源自動升級到安全組合資料庫。
+                此頁只顯示兩種正式資料：左側為已知衝突組合，右側為安全組合資料庫。
+                系統內部的未知觀察資料僅用於自動累積，不再顯示於公開頁面，避免和正式安全資料混淆。
             </p>
         </div>
 
@@ -60,8 +60,8 @@
                 建立示範資料
             </button>
 
-            <button onclick="backfillAutoSafe()" class="bg-emerald-700 hover:bg-emerald-600 px-5 py-3 rounded-xl font-bold text-white transition">
-                補回自動安全
+            <button onclick="syncAutoSafe()" class="bg-emerald-700 hover:bg-emerald-600 px-5 py-3 rounded-xl font-bold text-white transition">
+                同步自動安全
             </button>
             {% endif %}
         </div>
@@ -69,24 +69,18 @@
     </div>
 </section>
 
-<section class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+<section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
 
     <div class="bg-red-950/30 border border-red-900 rounded-2xl p-5">
         <p class="text-sm text-red-300">衝突規則數</p>
         <p id="conflictTotal" class="text-4xl font-bold text-red-400 mt-2">0</p>
-        <p class="text-xs text-slate-500 mt-2">已知會造成問題的組合</p>
+        <p class="text-xs text-slate-500 mt-2">資料庫總數，列表最多顯示前 80 筆</p>
     </div>
 
     <div class="bg-emerald-950/30 border border-emerald-900 rounded-2xl p-5">
         <p class="text-sm text-emerald-300">安全組合數</p>
         <p id="safeTotal" class="text-4xl font-bold text-emerald-400 mt-2">0</p>
-        <p class="text-xs text-slate-500 mt-2">資料庫總數，列表最多顯示前 80 筆</p>
-    </div>
-
-    <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-5">
-        <p class="text-sm text-slate-300">待驗證組合數</p>
-        <p id="unknownTotal" class="text-4xl font-bold text-slate-200 mt-2">0</p>
-        <p id="observationTotal" class="text-xs text-slate-500 mt-2">累積觀察 0 次 / 已升級 0 組</p>
+        <p class="text-xs text-slate-500 mt-2">玩家回報、OpenAI 安全、或系統自動候選</p>
     </div>
 
     <div class="bg-cyan-950/30 border border-cyan-900 rounded-2xl p-5">
@@ -95,21 +89,6 @@
         <p id="lastUpdated" class="text-xs text-slate-500 mt-3">尚未載入</p>
     </div>
 
-</section>
-
-<section id="candidatePanel" class="bg-slate-900/85 border border-slate-800 rounded-2xl p-6 mb-6 hidden">
-    <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4">
-        <div>
-            <h2 class="text-2xl font-bold text-slate-200">待驗證組合</h2>
-            <p class="text-sm text-slate-400 mt-1">
-                這些組合曾在玩家列表中出現。達到門檻後會以 auto_candidate 來源自動進入安全組合資料庫。
-            </p>
-        </div>
-        <span id="candidateBadge" class="px-3 py-1 rounded-full text-xs bg-slate-800 border border-slate-700 text-slate-300 whitespace-nowrap">
-            0 筆
-        </span>
-    </div>
-    <div id="candidateList" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
 </section>
 
 <section class="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -142,7 +121,7 @@
                 <div>
                     <h2 class="text-2xl font-bold text-emerald-300">安全組合資料庫</h2>
                     <p class="text-sm text-slate-400 mt-1">
-                        收錄玩家明確回報正常、示範資料，以及系統自動升級的 auto_candidate 組合。
+                        收錄玩家回報正常、OpenAI 明確判斷安全、示範資料，以及系統自動候選組合。
                     </p>
                 </div>
                 <span id="safeBadge" class="px-3 py-1 rounded-full text-xs bg-emerald-950 border border-emerald-700 text-emerald-300 whitespace-nowrap">0 筆</span>
@@ -164,8 +143,6 @@
 let latestStats = {
     conflict_rules: [],
     safe_combinations: [],
-    unknown_candidates: [],
-    unknown_observation_count: 0,
     game_label: ""
 };
 
@@ -192,7 +169,7 @@ function sourceLabel(source) {
     if (source === "openai_safe") return "OpenAI 安全";
     if (source === "demo") return "Demo";
     if (source === "user") return "玩家回報";
-    if (source === "auto_candidate") return "自動候選";
+    if (source === "auto_candidate") return "系統自動候選";
     return source || "未知來源";
 }
 
@@ -215,8 +192,7 @@ function matchKeyword(item, keyword) {
         item.conflict_degree,
         item.impact_area,
         item.effect,
-        item.source,
-        item.status
+        item.source
     ].join(" ").toLowerCase();
 
     return text.includes(keyword.toLowerCase());
@@ -244,7 +220,7 @@ async function seedDemoData() {
     await loadStats();
 }
 
-async function backfillAutoSafe() {
+async function syncAutoSafe() {
     const game = document.getElementById("gameSelect").value;
 
     const response = await fetch("/api/backfill_auto_safe", {
@@ -271,7 +247,6 @@ async function backfillAutoSafe() {
     await loadStats();
 }
 
-
 async function loadStats() {
     const game = document.getElementById("gameSelect").value;
     const conflictList = document.getElementById("conflictList");
@@ -294,9 +269,6 @@ async function loadStats() {
         document.getElementById("currentGameLabel").innerText = data.game_label || game;
         document.getElementById("conflictTotal").innerText = data.conflict_total_count ?? (data.conflict_rules || []).length;
         document.getElementById("safeTotal").innerText = data.safe_total_count ?? (data.safe_combinations || []).length;
-        document.getElementById("unknownTotal").innerText = data.unknown_pending_count ?? data.unknown_observation_count ?? 0;
-        document.getElementById("observationTotal").innerText =
-            `累積觀察 ${data.unknown_observation_total || 0} 次 / 已升級 ${data.unknown_promoted_count || 0} 組`;
 
         document.getElementById("dbStatus").innerText = "已載入";
         document.getElementById("lastUpdated").innerText = new Date().toLocaleString();
@@ -305,7 +277,6 @@ async function loadStats() {
 
     } catch (error) {
         document.getElementById("dbStatus").innerText = "錯誤";
-
         conflictList.innerHTML = `<div class="bg-red-950/40 border border-red-800 rounded-xl p-5 text-red-300">載入失敗：${escapeHtml(error.message)}</div>`;
         safeList.innerHTML = `<div class="bg-red-950/40 border border-red-800 rounded-xl p-5 text-red-300">載入失敗：${escapeHtml(error.message)}</div>`;
     }
@@ -316,58 +287,12 @@ function renderLists() {
 
     const conflictRules = (latestStats.conflict_rules || []).filter(item => matchKeyword(item, keyword));
     const safeCombinations = (latestStats.safe_combinations || []).filter(item => matchKeyword(item, keyword));
-    const candidates = (latestStats.unknown_candidates || []).filter(item => matchKeyword(item, keyword));
 
     document.getElementById("conflictBadge").innerText = `${conflictRules.length} 筆`;
     document.getElementById("safeBadge").innerText = `${safeCombinations.length} 筆`;
 
-    renderCandidateList(candidates);
     renderConflictList(conflictRules);
     renderSafeList(safeCombinations);
-}
-
-function renderCandidateList(items) {
-    const panel = document.getElementById("candidatePanel");
-    const list = document.getElementById("candidateList");
-    const badge = document.getElementById("candidateBadge");
-
-    if (!items.length) {
-        panel.classList.add("hidden");
-        list.innerHTML = "";
-        badge.innerText = "0 筆";
-        return;
-    }
-
-    panel.classList.remove("hidden");
-    badge.innerText = `${items.length} 筆`;
-
-    list.innerHTML = items.map(item => {
-        const statusText = item.status === "candidate" ? "候選待驗證" : "觀察中";
-        const statusClass = item.status === "candidate"
-            ? "bg-cyan-950 border-cyan-800 text-cyan-300"
-            : "bg-slate-800 border-slate-700 text-slate-300";
-
-        return `
-            <article class="bg-slate-950 border border-slate-800 rounded-xl p-4">
-                <h3 class="font-bold text-slate-200 leading-snug">
-                    ${escapeHtml(item.module_a)}
-                    <span class="text-slate-500">+</span>
-                    ${escapeHtml(item.module_b)}
-                </h3>
-                <div class="mt-3 flex flex-wrap gap-2 text-xs">
-                    <span class="px-3 py-1 rounded-full border ${statusClass}">
-                        ${statusText}
-                    </span>
-                    <span class="px-3 py-1 rounded-full border bg-slate-800 border-slate-700 text-slate-300">
-                        觀察 ${escapeHtml(item.observe_count)} 次
-                    </span>
-                </div>
-                <p class="text-xs text-slate-500 mt-3">
-                    未達門檻時仍是待驗證；達到門檻且無衝突紀錄時會自動進入安全組合資料庫。
-                </p>
-            </article>
-        `;
-    }).join("");
 }
 
 function renderConflictList(items) {
@@ -395,9 +320,6 @@ function renderConflictList(items) {
                                     <span class="text-slate-500">+</span>
                                     ${escapeHtml(item.module_b)}
                                 </h3>
-                                <p class="text-xs text-slate-500 mt-1">
-                                    衝突組合識別碼：${escapeHtml(item.module_a)} / ${escapeHtml(item.module_b)}
-                                </p>
                             </div>
                         </div>
 
@@ -471,9 +393,6 @@ function renderSafeList(items) {
                                     <span class="text-slate-500">+</span>
                                     ${escapeHtml(item.module_b)}
                                 </h3>
-                                <p class="text-xs text-slate-500 mt-1">
-                                    安全組合識別碼：${escapeHtml(item.module_a)} / ${escapeHtml(item.module_b)}
-                                </p>
                             </div>
                         </div>
 

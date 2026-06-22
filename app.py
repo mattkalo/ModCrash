@@ -825,6 +825,105 @@ def save_ai_conflict_result(game, ai_data):
     }
 
 
+def extract_ai_safe_items(ai_data):
+    """
+    Accept several possible OpenAI JSON shapes for safe combinations.
+    Expected key: likely_safe_combinations.
+    """
+    if not isinstance(ai_data, dict):
+        return []
+
+    for key in ["likely_safe_combinations", "safe_combinations", "likely_safe_pairs", "safe_pairs"]:
+        value = ai_data.get(key)
+        if isinstance(value, list):
+            return value
+
+    return []
+
+
+def save_ai_safe_result(game, ai_data):
+    """
+    Save OpenAI-predicted safe pairs into SafeCombination.
+    Only pairs explicitly returned as likely_safe_combinations are saved.
+    Known conflicts are never overwritten as safe.
+    """
+    safe_items = extract_ai_safe_items(ai_data)
+    saved_count = 0
+    skipped_count = 0
+    saved_pairs = []
+
+    for item in safe_items:
+        if not isinstance(item, dict):
+            skipped_count += 1
+            continue
+
+        module_a = str(item.get("module_a", "") or "").strip()
+        module_b = str(item.get("module_b", "") or "").strip()
+
+        modules = item.get("modules")
+        if (not module_a or not module_b) and isinstance(modules, list) and len(modules) >= 2:
+            module_a = str(modules[0]).strip()
+            module_b = str(modules[1]).strip()
+
+        if not module_a or not module_b:
+            skipped_count += 1
+            continue
+
+        a, b = normalize_pair(module_a, module_b)
+
+        existing_conflict = ConflictRule.query.filter_by(
+            game=game,
+            module_a=a,
+            module_b=b
+        ).first()
+
+        if existing_conflict:
+            skipped_count += 1
+            continue
+
+        try:
+            confidence = float(item.get("confidence_score", 0.60))
+        except Exception:
+            confidence = 0.60
+
+        safe = SafeCombination.query.filter_by(
+            game=game,
+            module_a=a,
+            module_b=b
+        ).first()
+
+        if safe:
+            safe.report_count += 1
+            safe.confidence_score = max(safe.confidence_score or 0, calculate_confidence(safe.report_count), confidence)
+            safe.source = "openai_safe"
+        else:
+            safe = SafeCombination(
+                game=game,
+                module_a=a,
+                module_b=b,
+                report_count=1,
+                confidence_score=confidence,
+                source="openai_safe"
+            )
+            db.session.add(safe)
+
+        saved_count += 1
+        saved_pairs.append({
+            "module_a": a,
+            "module_b": b,
+            "confidence_score": confidence,
+            "source": "openai_safe"
+        })
+
+    db.session.commit()
+
+    return {
+        "saved_count": saved_count,
+        "skipped_count": skipped_count,
+        "saved_pairs": saved_pairs
+    }
+
+
 def call_openai_analysis(game, mods, crash_log=""):
     api_key = os.environ.get("OPENAI_API_KEY")
 
@@ -880,7 +979,16 @@ def call_openai_analysis(game, mods, crash_log=""):
 錯誤描述 / Crash Log：
 {crash_log}
 
-請輸出 JSON：
+請輸出 JSON。
+
+規則：
+1. 如果有任何可能衝突，必須放在 likely_conflicts 陣列。
+2. likely_conflicts 內每筆一定要包含 module_a、module_b、conflict_type、conflict_degree。
+3. 如果你根據常見模組生態判斷某些組合大機率可共存，可以放在 likely_safe_combinations。
+4. 不要把所有未知組合都判定為安全；只有高信心、常見共存、低風險的組合才放入 likely_safe_combinations。
+5. 如果沒有足夠資訊判斷安全，就不要放入 likely_safe_combinations。
+
+JSON 格式：
 {{
   "summary": "整體分析摘要",
   "overall_conflict_degree": "中度功能異常",
@@ -895,6 +1003,14 @@ def call_openai_analysis(game, mods, crash_log=""):
       "confidence_score": 0.75,
       "reason": "判斷原因",
       "suggestion": "建議處理方式"
+    }}
+  ],
+  "likely_safe_combinations": [
+    {{
+      "module_a": "xxx",
+      "module_b": "yyy",
+      "confidence_score": 0.70,
+      "reason": "常見共存、低覆蓋範圍，沒有明顯衝突跡象。"
     }}
   ]
 }}
@@ -1232,7 +1348,8 @@ def api_ai_analyze():
     ai_result = call_openai_analysis(game, mods, crash_log)
 
     # New DB session after OpenAI call.
-    db_save_result = save_ai_conflict_result(game, ai_result)
+    db_conflict_save_result = save_ai_conflict_result(game, ai_result)
+    db_safe_save_result = save_ai_safe_result(game, ai_result)
 
     db.session.add(RawReport(
         game=game,
@@ -1252,10 +1369,13 @@ def api_ai_analyze():
         "ai_result": ai_result,
         "database_saved": {
             "raw_report_saved": True,
-            "conflict_rules_saved": db_save_result["saved_count"],
-            "conflict_rules_skipped": db_save_result["skipped_count"],
-            "saved_pairs": db_save_result["saved_pairs"],
-            "note": "OpenAI 只會把 likely_conflicts 內的衝突組合寫入衝突資料庫；若 AI 判斷沒有明確衝突，則只保存原始 AI 報告。"
+            "conflict_rules_saved": db_conflict_save_result["saved_count"],
+            "conflict_rules_skipped": db_conflict_save_result["skipped_count"],
+            "safe_combinations_saved": db_safe_save_result["saved_count"],
+            "safe_combinations_skipped": db_safe_save_result["skipped_count"],
+            "saved_conflict_pairs": db_conflict_save_result["saved_pairs"],
+            "saved_safe_pairs": db_safe_save_result["saved_pairs"],
+            "note": "OpenAI 的 likely_conflicts 會寫入衝突資料庫；likely_safe_combinations 會寫入安全組合資料庫，source=openai_safe。"
         }
     })
 
@@ -1466,23 +1586,9 @@ def api_stats():
         .all()
     )
 
-    unknown_pending_count = UnknownObservation.query.filter_by(game=game, promoted=False).count()
-    unknown_promoted_count = UnknownObservation.query.filter_by(game=game, promoted=True).count()
-    unknown_total_count = UnknownObservation.query.filter_by(game=game).count()
-
-    unknown_observation_total = (
-        db.session.query(db.func.coalesce(db.func.sum(UnknownObservation.observe_count), 0))
-        .filter(UnknownObservation.game == game)
-        .scalar()
-    )
-
-    unknown_candidates = (
-        UnknownObservation.query
-        .filter_by(game=game)
-        .order_by(UnknownObservation.observe_count.desc())
-        .limit(60)
-        .all()
-    )
+    # UnknownObservation is internal only.
+    # It is used for auto-promoting repeated unknown pairs into SafeCombination.
+    # It is intentionally not exposed on the public database page.
 
     conflict_items = []
     for c in conflicts:
@@ -1516,20 +1622,6 @@ def api_stats():
                 "source": s.source
             }
             for s in safes
-        ],
-        "unknown_observation_count": unknown_pending_count,
-        "unknown_pending_count": unknown_pending_count,
-        "unknown_promoted_count": unknown_promoted_count,
-        "unknown_total_count": unknown_total_count,
-        "unknown_observation_total": int(unknown_observation_total or 0),
-        "unknown_candidates": [
-            {
-                "module_a": u.module_a,
-                "module_b": u.module_b,
-                "observe_count": u.observe_count,
-                "status": "candidate" if u.promoted else "unknown"
-            }
-            for u in unknown_candidates
         ],
         "plans": PLAN_LIMITS,
         "games": GAME_PROFILES
